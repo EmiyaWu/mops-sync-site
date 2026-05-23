@@ -17,6 +17,7 @@ from mos_s import (
     F_KEY,
     F_SUBJECT,
     F_TIME,
+    GoogleSheetWriter,
     MOPSMessage,
     MessageNormalizer,
     SiteExporter,
@@ -56,6 +57,25 @@ class FakeGoogleSheetWriter:
 
     def organize_daily_worksheets(self) -> None:
         self.organized_count += 1
+
+
+class FakeWorksheet:
+    def __init__(self) -> None:
+        self.inserted_rows: list[list[str]] = []
+        self.insert_row_number: int | None = None
+
+    def row_values(self, row: int) -> list[str]:
+        return []
+
+    def update(self, range_name: str, values: list[list[str]]) -> None:
+        return None
+
+    def freeze(self, rows: int) -> None:
+        return None
+
+    def insert_rows(self, rows: list[list[str]], row: int, value_input_option: str) -> None:
+        self.inserted_rows = rows
+        self.insert_row_number = row
 
 
 def make_message(data_key: str, item_time: str = "09:01:02") -> MOPSMessage:
@@ -112,7 +132,7 @@ class DeduperTest(unittest.TestCase):
 
 
 class SiteExporterTest(unittest.TestCase):
-    def test_exports_public_site_without_private_fields(self) -> None:
+    def test_exports_public_site_with_detail_but_without_private_fields(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             output_dir = Path(tmpdir) / "public"
             SiteExporter(output_dir).export([make_message("private-key-1")], datetime(2026, 5, 23, 9, 5, tzinfo=ZoneInfo("Asia/Taipei")))
@@ -122,14 +142,40 @@ class SiteExporterTest(unittest.TestCase):
 
             self.assertTrue((output_dir / "assets" / "site.css").exists())
             self.assertTrue((output_dir / "assets" / "site.js").exists())
-            self.assertEqual(data["fields"], [F_DATE, F_TIME, "\u516c\u53f8\u4ee3\u865f", F_COMPANY_NAME, F_SUBJECT])
+            self.assertEqual(data["fields"], [F_DATE, F_TIME, "\u516c\u53f8\u4ee3\u865f", F_COMPANY_NAME, F_SUBJECT, F_DETAIL])
             self.assertEqual(data["messages"][0][F_COMPANY_NAME], COMPANY_NAME)
+            self.assertEqual(data["messages"][0][F_DETAIL], DETAIL)
             serialized = json.dumps(data, ensure_ascii=False)
-            self.assertNotIn(F_DETAIL, serialized)
             self.assertNotIn(F_KEY, serialized)
             self.assertNotIn(F_FETCHED_AT, serialized)
             self.assertNotIn("private-key-1", serialized)
-            self.assertNotIn(DETAIL, page)
+            self.assertIn(DETAIL, page)
+
+    def test_exports_newest_time_first(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_dir = Path(tmpdir) / "public"
+            older = make_message("older", "9:01")
+            newer = make_message("newer", "15:02:03")
+
+            SiteExporter(output_dir).export([older, newer], datetime(2026, 5, 23, 15, 5, tzinfo=ZoneInfo("Asia/Taipei")))
+
+            data = json.loads((output_dir / "data" / "latest.json").read_text(encoding="utf-8"))
+            self.assertEqual([message[F_TIME] for message in data["messages"]], ["15:02:03", "9:01"])
+
+
+class GoogleSheetWriterTest(unittest.TestCase):
+    def test_inserts_new_rows_below_header_newest_first(self) -> None:
+        worksheet = FakeWorksheet()
+        writer = GoogleSheetWriter.__new__(GoogleSheetWriter)
+        writer.max_visible_days = 7
+        writer._get_or_create_daily_worksheet = lambda worksheet_date: worksheet
+        writer.organize_daily_worksheets = lambda: None
+
+        count = writer.append_messages(datetime(2026, 5, 23), [make_message("older", "9:01"), make_message("newer", "15:02:03")])
+
+        self.assertEqual(count, 2)
+        self.assertEqual(worksheet.insert_row_number, 2)
+        self.assertEqual([row[1] for row in worksheet.inserted_rows], ["15:02:03", "9:01"])
 
 
 class WorksheetDateTest(unittest.TestCase):
