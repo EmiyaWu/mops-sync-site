@@ -31,24 +31,32 @@ jobs:
       - name: Install Python dependencies
         run: python -m pip install -r requirements.txt
 
-      - name: Sync MOPS and export public site
+      - name: Sync MOPS
+        id: sync
         env:
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           MOPS_SHEET_ID: ${{ secrets.MOPS_SHEET_ID }}
           TZ: Asia/Taipei
           MOPS_STATE_PATH: state/seen_messages.json
-        run: |
-          python mos_s.py once --export-site public
-          python site_export.py
+        run: python sync_once_output.py
+
+      - name: Export public site
+        if: ${{ steps.sync.outputs.has_new_rows == 'true' || github.event_name == 'workflow_dispatch' }}
+        env:
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          MOPS_SHEET_ID: ${{ secrets.MOPS_SHEET_ID }}
+          TZ: Asia/Taipei
+        run: python site_export.py
 
       - name: Upload static site artifact
+        if: ${{ steps.sync.outputs.has_new_rows == 'true' || github.event_name == 'workflow_dispatch' }}
         uses: actions/upload-artifact@v4
         with:
           name: mops-public-site
           path: public
 
       - name: Verify Cloudflare settings
-        if: ${{ env.CLOUDFLARE_API_TOKEN != '' && env.CLOUDFLARE_ACCOUNT_ID != '' && env.CLOUDFLARE_PROJECT_NAME != '' }}
+        if: ${{ (steps.sync.outputs.has_new_rows == 'true' || github.event_name == 'workflow_dispatch') && env.CLOUDFLARE_API_TOKEN != '' && env.CLOUDFLARE_ACCOUNT_ID != '' && env.CLOUDFLARE_PROJECT_NAME != '' }}
         run: |
           test -d public
           find public -maxdepth 3 -type f | sort
@@ -62,7 +70,7 @@ jobs:
           PY
 
       - name: Deploy to Cloudflare Pages
-        if: ${{ env.CLOUDFLARE_API_TOKEN != '' && env.CLOUDFLARE_ACCOUNT_ID != '' && env.CLOUDFLARE_PROJECT_NAME != '' }}
+        if: ${{ (steps.sync.outputs.has_new_rows == 'true' || github.event_name == 'workflow_dispatch') && env.CLOUDFLARE_API_TOKEN != '' && env.CLOUDFLARE_ACCOUNT_ID != '' && env.CLOUDFLARE_PROJECT_NAME != '' }}
         run: |
           npm install --global wrangler@latest
           wrangler --version
