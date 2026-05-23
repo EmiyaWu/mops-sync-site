@@ -45,9 +45,17 @@ jobs:
           name: mops-public-site
           path: public
 
+      - name: Verify Cloudflare settings
+        if: ${{ env.CLOUDFLARE_API_TOKEN != '' && env.CLOUDFLARE_ACCOUNT_ID != '' && env.CLOUDFLARE_PROJECT_NAME != '' }}
+        run: |
+          test -d public
+          find public -maxdepth 3 -type f | sort
+          echo "Cloudflare project: ${CLOUDFLARE_PROJECT_NAME}"
+          echo "Cloudflare account id length: ${#CLOUDFLARE_ACCOUNT_ID}"
+
       - name: Deploy to Cloudflare Pages
         if: ${{ env.CLOUDFLARE_API_TOKEN != '' && env.CLOUDFLARE_ACCOUNT_ID != '' && env.CLOUDFLARE_PROJECT_NAME != '' }}
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ env.CLOUDFLARE_API_TOKEN }}
-          command: pages deploy public --project-name=${{ env.CLOUDFLARE_PROJECT_NAME }} --branch=main
+        run: |
+          npm install --global wrangler@latest
+          wrangler --version
+          wrangler pages deploy public --project-name="$CLOUDFLARE_PROJECT_NAME" --branch=main
