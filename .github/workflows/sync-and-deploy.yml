@@ -50,12 +50,20 @@ jobs:
         run: |
           test -d public
           find public -maxdepth 3 -type f | sort
-          echo "Cloudflare project: ${CLOUDFLARE_PROJECT_NAME}"
+          echo "Cloudflare project secret length: ${#CLOUDFLARE_PROJECT_NAME}"
           echo "Cloudflare account id length: ${#CLOUDFLARE_ACCOUNT_ID}"
+          python - <<'PY'
+          import os
+          project = os.environ.get("CLOUDFLARE_PROJECT_NAME", "")
+          print("Project secret has leading/trailing whitespace:", project != project.strip())
+          print("Project secret character codes:", " ".join(str(ord(ch)) for ch in project))
+          PY
 
       - name: Deploy to Cloudflare Pages
         if: ${{ env.CLOUDFLARE_API_TOKEN != '' && env.CLOUDFLARE_ACCOUNT_ID != '' && env.CLOUDFLARE_PROJECT_NAME != '' }}
         run: |
           npm install --global wrangler@latest
           wrangler --version
+          echo "Projects visible to this token/account:"
+          wrangler pages project list || true
           wrangler pages deploy public --project-name="$CLOUDFLARE_PROJECT_NAME" --branch=main
