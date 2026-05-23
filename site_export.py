@@ -117,8 +117,11 @@ INDEX_HTML = """<!doctype html>
 <body>
   <main class="app-shell">
     <section class="topbar">
-      <div>
-        <p class="eyebrow">\u5373\u6642\u91cd\u8a0a\u770b\u677f</p>
+      <div class="brand-block">
+        <div class="brand-row">
+          <span class="brand-mark">M</span>
+          <p class="eyebrow">\u5373\u6642\u91cd\u8a0a\u770b\u677f</p>
+        </div>
         <h1>\u516c\u958b\u8cc7\u8a0a\u89c0\u6e2c\u7ad9\u91cd\u5927\u8a0a\u606f</h1>
         <p class="subtitle">\u81ea\u52d5\u540c\u6b65\u7576\u65e5\u4e0a\u5e02\u6ac3\u516c\u53f8\u91cd\u5927\u8a0a\u606f\uff0c\u986f\u793a\u516c\u53f8\u3001\u4e3b\u65e8\u8207\u8a73\u7d30\u5167\u5bb9\u3002</p>
       </div>
@@ -128,16 +131,17 @@ INDEX_HTML = """<!doctype html>
       </div>
     </section>
 
-    <section class="toolbar">
-      <label>\u516c\u53f8\u4ee3\u865f<input id="companyIdFilter" type="search" inputmode="numeric" placeholder="2330"></label>
-      <label>\u516c\u53f8\u7c21\u7a31<input id="companyNameFilter" type="search" placeholder="\u53f0\u7a4d\u96fb"></label>
-      <label class="wide-filter">\u95dc\u9375\u5b57<input id="subjectFilter" type="search" placeholder="\u641c\u5c0b\u4e3b\u65e8\u6216\u8a73\u7d30\u5167\u5bb9"></label>
-      <button id="sortTimeButton" type="button">\u6700\u65b0\u5728\u524d</button>
-    </section>
-
-    <section class="status-line">
-      <span id="resultStatus">\u8cc7\u6599\u8f09\u5165\u4e2d</span>
-      <span>\u4f86\u6e90\uff1aMOPS \u516c\u958b\u8cc7\u8a0a\u89c0\u6e2c\u7ad9</span>
+    <section class="toolbar-panel">
+      <div class="toolbar">
+        <label>\u516c\u53f8\u4ee3\u865f<input id="companyIdFilter" type="search" inputmode="numeric" placeholder="2330"></label>
+        <label>\u516c\u53f8\u7c21\u7a31<input id="companyNameFilter" type="search" placeholder="\u53f0\u7a4d\u96fb"></label>
+        <label class="wide-filter">\u95dc\u9375\u5b57<input id="subjectFilter" type="search" placeholder="\u641c\u5c0b\u4e3b\u65e8\u6216\u8a73\u7d30\u5167\u5bb9"></label>
+        <button id="sortTimeButton" type="button">\u6700\u65b0\u5728\u524d</button>
+      </div>
+      <div class="status-line">
+        <span id="resultStatus">\u8cc7\u6599\u8f09\u5165\u4e2d</span>
+        <span>\u4f86\u6e90\uff1aMOPS \u516c\u958b\u8cc7\u8a0a\u89c0\u6e2c\u7ad9</span>
+      </div>
     </section>
 
     <section class="table-wrap">
@@ -155,64 +159,94 @@ INDEX_HTML = """<!doctype html>
 
 SITE_CSS = """
 :root {
-  --bg: #f5f7fa;
+  --bg: #f3f5f4;
+  --surface: #eef3f1;
   --panel: #ffffff;
-  --panel-soft: #f8fafc;
-  --ink: #172033;
-  --muted: #64748b;
-  --line: #d9e0ea;
-  --line-soft: #edf1f6;
-  --accent: #006f72;
-  --accent-strong: #004e51;
-  --gold: #a66b00;
+  --panel-soft: #f8faf8;
+  --ink: #14201f;
+  --muted: #65716f;
+  --line: #d6dfdc;
+  --line-soft: #edf2f0;
+  --accent: #08726f;
+  --accent-strong: #045350;
+  --accent-soft: #e3f2ef;
+  --gold: #9a6a18;
+  --gold-soft: #fff3d8;
+  --danger: #9f3a31;
+  --shadow: 0 18px 42px rgba(20, 32, 31, 0.08);
 }
 * { box-sizing: border-box; }
 body {
   margin: 0;
-  background: var(--bg);
+  min-height: 100vh;
+  background:
+    linear-gradient(180deg, #e9f0ee 0, #f6f7f5 280px, var(--bg) 100%);
   color: var(--ink);
   font-family: "Noto Sans TC", "Microsoft JhengHei", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
 }
-.app-shell { width: min(1240px, calc(100% - 32px)); margin: 0 auto; padding: 28px 0 40px; }
+.app-shell { width: min(1280px, calc(100% - 36px)); margin: 0 auto; padding: 30px 0 42px; }
 .topbar {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 24px;
   align-items: end;
-  padding-bottom: 18px;
-  border-bottom: 1px solid var(--line);
+  padding: 20px 22px;
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid rgba(214, 223, 220, 0.9);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+}
+.brand-block { min-width: 0; }
+.brand-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.brand-mark {
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  color: #fff;
+  background: linear-gradient(135deg, var(--accent), #0e8f78);
+  font-size: 14px;
+  font-weight: 900;
 }
 .eyebrow {
-  margin: 0 0 8px;
+  margin: 0;
   color: var(--accent-strong);
   font-size: 13px;
   font-weight: 800;
 }
-h1 { margin: 0; font-size: 30px; line-height: 1.25; letter-spacing: 0; }
-.subtitle { max-width: 760px; margin: 10px 0 0; color: var(--muted); font-size: 14px; line-height: 1.7; }
-.metrics { display: grid; grid-template-columns: 110px minmax(230px, auto); gap: 10px; }
+h1 { margin: 0; font-size: 31px; line-height: 1.24; letter-spacing: 0; }
+.subtitle { max-width: 780px; margin: 10px 0 0; color: var(--muted); font-size: 14px; line-height: 1.72; }
+.metrics { display: grid; grid-template-columns: 118px minmax(238px, auto); gap: 10px; }
 .metric {
-  min-height: 72px;
-  padding: 12px 14px;
+  min-height: 76px;
+  padding: 13px 15px;
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 8px;
-  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.04);
+  box-shadow: 0 10px 26px rgba(20, 32, 31, 0.045);
 }
 .metric span { display: block; color: var(--muted); font-size: 12px; margin-bottom: 8px; font-weight: 700; }
-.metric strong { display: block; font-size: 17px; line-height: 1.35; }
+.metric strong { display: block; font-size: 18px; line-height: 1.35; }
+.toolbar-panel {
+  margin: 16px 0 12px;
+  padding: 14px;
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 12px 30px rgba(20, 32, 31, 0.055);
+}
 .toolbar {
   display: grid;
-  grid-template-columns: 160px 180px minmax(260px, 1fr) 132px;
+  grid-template-columns: 164px 188px minmax(280px, 1fr) 136px;
   gap: 12px;
   align-items: end;
-  margin: 20px 0 10px;
 }
 label { color: var(--muted); font-size: 12px; font-weight: 800; }
-input, button { width: 100%; min-height: 42px; margin-top: 7px; border-radius: 8px; font: inherit; }
+input, button { width: 100%; min-height: 43px; margin-top: 7px; border-radius: 8px; font: inherit; }
 input {
-  padding: 9px 11px;
-  background: #fff;
+  padding: 9px 12px;
+  background: #fbfcfb;
   color: var(--ink);
   border: 1px solid var(--line);
   outline: none;
@@ -230,43 +264,67 @@ button:hover { background: var(--accent-strong); border-color: var(--accent-stro
   display: flex;
   justify-content: space-between;
   gap: 12px;
-  margin: 0 0 12px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line-soft);
   color: var(--muted);
   font-size: 13px;
 }
-.status-line span:first-child { color: var(--gold); font-weight: 800; }
+.status-line span:first-child {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--gold);
+  font-weight: 800;
+}
+.status-line span:first-child::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--gold);
+  box-shadow: 0 0 0 4px var(--gold-soft);
+}
 .table-wrap {
   overflow: auto;
-  max-height: calc(100vh - 230px);
+  max-height: calc(100vh - 260px);
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 8px;
-  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.05);
+  box-shadow: var(--shadow);
 }
 table { width: 100%; border-collapse: separate; border-spacing: 0; }
-th, td { padding: 13px 14px; border-bottom: 1px solid var(--line-soft); text-align: left; vertical-align: top; }
+th, td { padding: 13px 15px; border-bottom: 1px solid var(--line-soft); text-align: left; vertical-align: top; }
 th {
   position: sticky;
   top: 0;
   z-index: 1;
-  background: #eef3f6;
-  color: #334155;
+  background: #edf3f1;
+  color: #344441;
   font-size: 13px;
   white-space: nowrap;
 }
-td { font-size: 14px; }
-tbody tr:hover { background: var(--panel-soft); }
+td { font-size: 14px; background: #fff; }
+tbody tr:hover td { background: var(--panel-soft); }
 td:nth-child(1) { width: 96px; color: var(--accent-strong); font-weight: 800; white-space: nowrap; }
 td:nth-child(2) { width: 116px; font-variant-numeric: tabular-nums; }
 td:nth-child(3) { width: 136px; font-weight: 700; }
 td.subject { line-height: 1.6; }
-td.subject strong { display: block; margin-bottom: 7px; color: #111827; font-size: 15px; }
-td.subject p { margin: 0; color: #3f4a59; white-space: pre-wrap; }
+td.subject strong {
+  display: inline-block;
+  margin-bottom: 7px;
+  color: #111827;
+  font-size: 15px;
+  border-bottom: 2px solid rgba(8, 114, 111, 0.18);
+}
+td.subject p { margin: 0; color: #43514f; white-space: pre-wrap; }
 .empty-row td { padding: 30px 14px; color: var(--muted); text-align: center; }
 @media (max-width: 760px) {
-  .app-shell { width: min(100% - 20px, 1240px); padding-top: 18px; }
+  .app-shell { width: min(100% - 20px, 1280px); padding-top: 16px; }
   .topbar, .metrics, .toolbar { display: grid; grid-template-columns: 1fr; }
+  .topbar { padding: 16px; gap: 16px; }
   h1 { font-size: 24px; }
+  .toolbar-panel { padding: 12px; }
   .status-line { display: grid; }
   .table-wrap { max-height: none; overflow: visible; background: transparent; border: 0; box-shadow: none; }
   table, thead, tbody, tr, th, td { display: block; }
@@ -277,9 +335,9 @@ td.subject p { margin: 0; color: #3f4a59; white-space: pre-wrap; }
     background: var(--panel);
     border: 1px solid var(--line);
     border-radius: 8px;
-    box-shadow: 0 10px 24px rgba(15, 23, 42, 0.04);
+    box-shadow: 0 10px 24px rgba(20, 32, 31, 0.055);
   }
-  td { display: grid; grid-template-columns: 92px 1fr; gap: 10px; width: auto !important; padding: 5px 0; border-bottom: 0; }
+  td { display: grid; grid-template-columns: 92px 1fr; gap: 10px; width: auto !important; padding: 5px 0; border-bottom: 0; background: transparent; }
   td::before { content: attr(data-label); color: var(--muted); font-weight: 800; }
   td.subject strong { margin-bottom: 6px; }
 }
@@ -332,6 +390,8 @@ function render() {
     .filter((item) => normalize(item[FIELD_COMPANY_NAME]).includes(nameTerm))
     .filter((item) => `${normalize(item[FIELD_SUBJECT])} ${normalize(item[FIELD_DETAIL])}`.includes(subjectTerm))
     .sort((a, b) => {
+      const left = `${a[FIELD_DATE]} ${a[FIELD_TIME]}`;
+      const right = `${b[FIELD_DATE]} ${b[FIELD_TIME]}`;
       const leftKey = `${sortDate(a[FIELD_DATE])} ${sortTime(a[FIELD_TIME])}`;
       const rightKey = `${sortDate(b[FIELD_DATE])} ${sortTime(b[FIELD_TIME])}`;
       return newestFirst ? rightKey.localeCompare(leftKey) : leftKey.localeCompare(rightKey);
