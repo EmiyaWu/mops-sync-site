@@ -50,5 +50,4 @@ jobs:
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ env.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ env.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy public --project-name=${{ env.CLOUDFLARE_PROJECT_NAME }}
+          command: pages deploy public --project-name=${{ env.CLOUDFLARE_PROJECT_NAME }} --branch=main
