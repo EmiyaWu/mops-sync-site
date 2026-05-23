@@ -111,34 +111,39 @@ INDEX_HTML = """<!doctype html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>MOPS Material Information Dashboard</title>
+  <title>\u516c\u958b\u8cc7\u8a0a\u89c0\u6e2c\u7ad9\u91cd\u5927\u8a0a\u606f</title>
   <link rel="stylesheet" href="assets/site.css">
 </head>
 <body>
   <main class="app-shell">
     <section class="topbar">
       <div>
-        <p class="eyebrow">MOPS Live Feed</p>
-        <h1>Material Information Dashboard</h1>
-        <p class="subtitle">A clean public dashboard for MOPS material information, including subject and full detail content.</p>
+        <p class="eyebrow">\u5373\u6642\u91cd\u8a0a\u770b\u677f</p>
+        <h1>\u516c\u958b\u8cc7\u8a0a\u89c0\u6e2c\u7ad9\u91cd\u5927\u8a0a\u606f</h1>
+        <p class="subtitle">\u81ea\u52d5\u540c\u6b65\u7576\u65e5\u4e0a\u5e02\u6ac3\u516c\u53f8\u91cd\u5927\u8a0a\u606f\uff0c\u986f\u793a\u516c\u53f8\u3001\u4e3b\u65e8\u8207\u8a73\u7d30\u5167\u5bb9\u3002</p>
       </div>
       <div class="metrics">
-        <div class="metric"><span>Rows Today</span><strong id="totalCount">0</strong></div>
-        <div class="metric wide"><span>Last Updated</span><strong id="generatedAt">-</strong></div>
+        <div class="metric"><span>\u4eca\u65e5\u7b46\u6578</span><strong id="totalCount">0</strong></div>
+        <div class="metric wide"><span>\u6700\u5f8c\u66f4\u65b0</span><strong id="generatedAt">-</strong></div>
       </div>
     </section>
 
     <section class="toolbar">
-      <label>Company ID<input id="companyIdFilter" type="search" inputmode="numeric" placeholder="2330"></label>
-      <label>Company<input id="companyNameFilter" type="search" placeholder="TSMC"></label>
-      <label class="wide-filter">Subject or detail<input id="subjectFilter" type="search" placeholder="Search subject and detail content"></label>
-      <button id="sortTimeButton" type="button">Time: Newest</button>
+      <label>\u516c\u53f8\u4ee3\u865f<input id="companyIdFilter" type="search" inputmode="numeric" placeholder="2330"></label>
+      <label>\u516c\u53f8\u7c21\u7a31<input id="companyNameFilter" type="search" placeholder="\u53f0\u7a4d\u96fb"></label>
+      <label class="wide-filter">\u95dc\u9375\u5b57<input id="subjectFilter" type="search" placeholder="\u641c\u5c0b\u4e3b\u65e8\u6216\u8a73\u7d30\u5167\u5bb9"></label>
+      <button id="sortTimeButton" type="button">\u6700\u65b0\u5728\u524d</button>
+    </section>
+
+    <section class="status-line">
+      <span id="resultStatus">\u8cc7\u6599\u8f09\u5165\u4e2d</span>
+      <span>\u4f86\u6e90\uff1aMOPS \u516c\u958b\u8cc7\u8a0a\u89c0\u6e2c\u7ad9</span>
     </section>
 
     <section class="table-wrap">
       <table>
-        <thead><tr><th>Time</th><th>Company ID</th><th>Company</th><th>Subject and detail</th></tr></thead>
-        <tbody id="messageRows"><tr class="empty-row"><td colspan="4">Loading...</td></tr></tbody>
+        <thead><tr><th>\u6642\u9593</th><th>\u516c\u53f8\u4ee3\u865f</th><th>\u516c\u53f8\u7c21\u7a31</th><th>\u4e3b\u65e8\u8207\u8a73\u7d30\u5167\u5bb9</th></tr></thead>
+        <tbody id="messageRows"><tr class="empty-row"><td colspan="4">\u8cc7\u6599\u8f09\u5165\u4e2d...</td></tr></tbody>
       </table>
     </section>
   </main>
@@ -150,49 +155,133 @@ INDEX_HTML = """<!doctype html>
 
 SITE_CSS = """
 :root {
-  --bg: #f4f6f8;
+  --bg: #f5f7fa;
   --panel: #ffffff;
-  --ink: #1b2430;
-  --muted: #657181;
-  --line: #d8dee6;
-  --accent: #007a78;
-  --accent-strong: #005c5a;
+  --panel-soft: #f8fafc;
+  --ink: #172033;
+  --muted: #64748b;
+  --line: #d9e0ea;
+  --line-soft: #edf1f6;
+  --accent: #006f72;
+  --accent-strong: #004e51;
+  --gold: #a66b00;
 }
 * { box-sizing: border-box; }
-body { margin: 0; background: var(--bg); color: var(--ink); font-family: "Noto Sans TC", "Microsoft JhengHei", system-ui, sans-serif; }
-.app-shell { width: min(1180px, calc(100% - 32px)); margin: 0 auto; padding: 28px 0 36px; }
-.topbar { display: flex; align-items: end; justify-content: space-between; gap: 20px; padding-bottom: 18px; border-bottom: 1px solid var(--line); }
-.eyebrow { margin: 0 0 6px; color: var(--accent-strong); font-size: 13px; font-weight: 700; }
-h1 { margin: 0; font-size: 28px; line-height: 1.25; }
-.subtitle { max-width: 720px; margin: 10px 0 0; color: var(--muted); font-size: 14px; line-height: 1.65; }
-.metrics { display: grid; grid-template-columns: minmax(96px, auto) minmax(220px, auto); gap: 10px; }
-.metric { min-height: 68px; padding: 12px 14px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
-.metric span { display: block; color: var(--muted); font-size: 12px; margin-bottom: 6px; }
-.metric strong { display: block; font-size: 16px; line-height: 1.35; }
-.toolbar { display: grid; grid-template-columns: 160px 180px minmax(240px, 1fr) 128px; gap: 12px; align-items: end; margin: 20px 0 14px; }
-label { color: var(--muted); font-size: 12px; font-weight: 700; }
-input, button { width: 100%; min-height: 40px; margin-top: 6px; border: 1px solid var(--line); border-radius: 8px; font: inherit; }
-input { padding: 8px 10px; background: #fff; }
-button { cursor: pointer; color: #fff; background: var(--accent); font-weight: 700; }
-button:hover { background: var(--accent-strong); }
-.table-wrap { overflow: hidden; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
-table { width: 100%; border-collapse: collapse; }
-th, td { padding: 12px 14px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
-th { position: sticky; top: 0; z-index: 1; background: #eef3f6; color: #334155; font-size: 13px; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: "Noto Sans TC", "Microsoft JhengHei", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+}
+.app-shell { width: min(1240px, calc(100% - 32px)); margin: 0 auto; padding: 28px 0 40px; }
+.topbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 24px;
+  align-items: end;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--line);
+}
+.eyebrow {
+  margin: 0 0 8px;
+  color: var(--accent-strong);
+  font-size: 13px;
+  font-weight: 800;
+}
+h1 { margin: 0; font-size: 30px; line-height: 1.25; letter-spacing: 0; }
+.subtitle { max-width: 760px; margin: 10px 0 0; color: var(--muted); font-size: 14px; line-height: 1.7; }
+.metrics { display: grid; grid-template-columns: 110px minmax(230px, auto); gap: 10px; }
+.metric {
+  min-height: 72px;
+  padding: 12px 14px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.04);
+}
+.metric span { display: block; color: var(--muted); font-size: 12px; margin-bottom: 8px; font-weight: 700; }
+.metric strong { display: block; font-size: 17px; line-height: 1.35; }
+.toolbar {
+  display: grid;
+  grid-template-columns: 160px 180px minmax(260px, 1fr) 132px;
+  gap: 12px;
+  align-items: end;
+  margin: 20px 0 10px;
+}
+label { color: var(--muted); font-size: 12px; font-weight: 800; }
+input, button { width: 100%; min-height: 42px; margin-top: 7px; border-radius: 8px; font: inherit; }
+input {
+  padding: 9px 11px;
+  background: #fff;
+  color: var(--ink);
+  border: 1px solid var(--line);
+  outline: none;
+}
+input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(0, 111, 114, 0.12); }
+button {
+  cursor: pointer;
+  color: #fff;
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  font-weight: 800;
+}
+button:hover { background: var(--accent-strong); border-color: var(--accent-strong); }
+.status-line {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 0 12px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.status-line span:first-child { color: var(--gold); font-weight: 800; }
+.table-wrap {
+  overflow: auto;
+  max-height: calc(100vh - 230px);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.05);
+}
+table { width: 100%; border-collapse: separate; border-spacing: 0; }
+th, td { padding: 13px 14px; border-bottom: 1px solid var(--line-soft); text-align: left; vertical-align: top; }
+th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #eef3f6;
+  color: #334155;
+  font-size: 13px;
+  white-space: nowrap;
+}
 td { font-size: 14px; }
-td.subject { line-height: 1.55; }
-td.subject strong { display: block; margin-bottom: 8px; color: #111827; font-size: 15px; }
+tbody tr:hover { background: var(--panel-soft); }
+td:nth-child(1) { width: 96px; color: var(--accent-strong); font-weight: 800; white-space: nowrap; }
+td:nth-child(2) { width: 116px; font-variant-numeric: tabular-nums; }
+td:nth-child(3) { width: 136px; font-weight: 700; }
+td.subject { line-height: 1.6; }
+td.subject strong { display: block; margin-bottom: 7px; color: #111827; font-size: 15px; }
 td.subject p { margin: 0; color: #3f4a59; white-space: pre-wrap; }
-.empty-row td { padding: 28px 14px; color: var(--muted); text-align: center; }
+.empty-row td { padding: 30px 14px; color: var(--muted); text-align: center; }
 @media (max-width: 760px) {
-  .app-shell { width: min(100% - 20px, 1180px); padding-top: 18px; }
+  .app-shell { width: min(100% - 20px, 1240px); padding-top: 18px; }
   .topbar, .metrics, .toolbar { display: grid; grid-template-columns: 1fr; }
-  h1 { font-size: 22px; }
+  h1 { font-size: 24px; }
+  .status-line { display: grid; }
+  .table-wrap { max-height: none; overflow: visible; background: transparent; border: 0; box-shadow: none; }
   table, thead, tbody, tr, th, td { display: block; }
   thead { display: none; }
-  tr { padding: 12px 14px; border-bottom: 1px solid var(--line); }
-  td { display: grid; grid-template-columns: 92px 1fr; gap: 10px; padding: 5px 0; border-bottom: 0; }
-  td::before { content: attr(data-label); color: var(--muted); font-weight: 700; }
+  tr {
+    margin-bottom: 10px;
+    padding: 13px 14px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    box-shadow: 0 10px 24px rgba(15, 23, 42, 0.04);
+  }
+  td { display: grid; grid-template-columns: 92px 1fr; gap: 10px; width: auto !important; padding: 5px 0; border-bottom: 0; }
+  td::before { content: attr(data-label); color: var(--muted); font-weight: 800; }
+  td.subject strong { margin-bottom: 6px; }
 }
 """
 
@@ -215,6 +304,17 @@ let messages = [];
 let newestFirst = true;
 
 function normalize(value) { return String(value || "").trim().toLowerCase(); }
+function sortDate(value) {
+  const digits = String(value || "").replace(/\\D/g, "");
+  return digits.length === 8 ? digits : String(value || "");
+}
+function sortTime(value) {
+  const parts = String(value || "").match(/\\d+/g) || [];
+  const h = String(Number(parts[0] || 0)).padStart(2, "0");
+  const m = String(Number(parts[1] || 0)).padStart(2, "0");
+  const s = String(Number(parts[2] || 0)).padStart(2, "0");
+  return `${h}:${m}:${s}`;
+}
 function escapeHtml(value) {
   return String(value || "")
     .replaceAll("&", "&amp;")
@@ -232,40 +332,42 @@ function render() {
     .filter((item) => normalize(item[FIELD_COMPANY_NAME]).includes(nameTerm))
     .filter((item) => `${normalize(item[FIELD_SUBJECT])} ${normalize(item[FIELD_DETAIL])}`.includes(subjectTerm))
     .sort((a, b) => {
-      const left = `${a[FIELD_DATE]} ${a[FIELD_TIME]}`;
-      const right = `${b[FIELD_DATE]} ${b[FIELD_TIME]}`;
-      return newestFirst ? right.localeCompare(left) : left.localeCompare(right);
+      const leftKey = `${sortDate(a[FIELD_DATE])} ${sortTime(a[FIELD_TIME])}`;
+      const rightKey = `${sortDate(b[FIELD_DATE])} ${sortTime(b[FIELD_TIME])}`;
+      return newestFirst ? rightKey.localeCompare(leftKey) : leftKey.localeCompare(rightKey);
     });
   totalCount.textContent = String(filtered.length);
+  document.querySelector("#resultStatus").textContent = `\\u76ee\\u524d\\u986f\\u793a ${filtered.length} \\u7b46\\uff0f\\u4eca\\u65e5\\u5171 ${messages.length} \\u7b46`;
   rowsBody.innerHTML = filtered.length
     ? filtered.map((item) => `
       <tr>
-        <td data-label="Time">${escapeHtml(item[FIELD_TIME])}</td>
-        <td data-label="Company ID">${escapeHtml(item[FIELD_COMPANY_ID])}</td>
-        <td data-label="Company">${escapeHtml(item[FIELD_COMPANY_NAME])}</td>
-        <td data-label="Subject and detail" class="subject">
+        <td data-label="\\u6642\\u9593">${escapeHtml(item[FIELD_TIME])}</td>
+        <td data-label="\\u516c\\u53f8\\u4ee3\\u865f">${escapeHtml(item[FIELD_COMPANY_ID])}</td>
+        <td data-label="\\u516c\\u53f8\\u7c21\\u7a31">${escapeHtml(item[FIELD_COMPANY_NAME])}</td>
+        <td data-label="\\u4e3b\\u65e8\\u8207\\u8a73\\u7d30\\u5167\\u5bb9" class="subject">
           <strong>${escapeHtml(item[FIELD_SUBJECT])}</strong>
           <p>${escapeHtml(item[FIELD_DETAIL])}</p>
         </td>
       </tr>
     `).join("")
-    : '<tr class="empty-row"><td colspan="4">No matching rows.</td></tr>';
+    : '<tr class="empty-row"><td colspan="4">\\u6c92\\u6709\\u7b26\\u5408\\u689d\\u4ef6\\u7684\\u8cc7\\u6599</td></tr>';
 }
 async function loadData() {
   const response = await fetch("data/latest.json", { cache: "no-store" });
   const data = await response.json();
   messages = data.messages || [];
-  document.querySelector("#generatedAt").textContent = data.generated_at || "";
+  document.querySelector("#generatedAt").textContent = data.generated_at ? new Date(data.generated_at).toLocaleString("zh-TW", { hour12: false }) : "-";
   render();
 }
 [companyIdFilter, companyNameFilter, subjectFilter].forEach((input) => input.addEventListener("input", render));
 sortTimeButton.addEventListener("click", () => {
   newestFirst = !newestFirst;
-  sortTimeButton.textContent = newestFirst ? "Time: Newest" : "Time: Oldest";
+  sortTimeButton.textContent = newestFirst ? "\\u6700\\u65b0\\u5728\\u524d" : "\\u6700\\u820a\\u5728\\u524d";
   render();
 });
 loadData().catch(() => {
-  rowsBody.innerHTML = '<tr class="empty-row"><td colspan="4">Failed to load data.</td></tr>';
+  document.querySelector("#resultStatus").textContent = "\\u8cc7\\u6599\\u8f09\\u5165\\u5931\\u6557";
+  rowsBody.innerHTML = '<tr class="empty-row"><td colspan="4">\\u8cc7\\u6599\\u8f09\\u5165\\u5931\\u6557\\uff0c\\u8acb\\u7a0d\\u5f8c\\u91cd\\u65b0\\u6574\\u7406</td></tr>';
 });
 """
 
