@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+state/
+secrets/
+public/
+build/
+dist/
+release/
+.env
+service-account*.json
+mops_sync.spec
