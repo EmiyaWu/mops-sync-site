@@ -3,9 +3,9 @@
 ## Architecture
 
 - GitHub Actions runs every 5 minutes.
-- The job runs `python mos_s.py once --export-site public`.
+- The job runs `python mos_s.py once --export-site public`, then `python site_export.py` to build the public dashboard.
 - Google Sheet keeps the full internal dataset.
-- `public/` contains only the semi-public static website.
+- `public/` contains the static website deployed to Cloudflare Pages.
 - Cloudflare Pages deploys the static website.
 
 ## GitHub Actions Secrets
@@ -22,17 +22,17 @@ Do not commit `service-account.json` to GitHub.
 
 ## Public Website Fields
 
-The website exposes only:
+The website exposes:
 
 - Date
 - Time
 - Company ID
 - Company abbreviation
 - Subject
+- Detail content
 
 The website does not expose:
 
-- Detail content
 - Data key
 - Fetched-at timestamp
 
@@ -40,6 +40,7 @@ The website does not expose:
 
 ```powershell
 python mos_s.py once --export-site public
+python site_export.py
 python -m http.server 8000 -d public
 ```
 
