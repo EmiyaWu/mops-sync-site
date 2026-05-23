@@ -37,7 +37,9 @@ jobs:
           MOPS_SHEET_ID: ${{ secrets.MOPS_SHEET_ID }}
           TZ: Asia/Taipei
           MOPS_STATE_PATH: state/seen_messages.json
-        run: python mos_s.py once --export-site public
+        run: |
+          python mos_s.py once --export-site public
+          python site_export.py
 
       - name: Upload static site artifact
         uses: actions/upload-artifact@v4
