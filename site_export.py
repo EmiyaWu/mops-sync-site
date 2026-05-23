@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -65,7 +66,26 @@ def rows_to_public_messages(rows: list[list[str]]) -> list[dict[str, str]]:
             index = header_index.get(field)
             item[field] = row[index].strip() if index is not None and index < len(row) else ""
         messages.append(item)
-    return sorted(messages, key=lambda item: (item[F_DATE], item[F_TIME], item[F_COMPANY_ID], item[F_SUBJECT]), reverse=True)
+    return sorted(messages, key=message_sort_key, reverse=True)
+
+
+def message_sort_key(item: dict[str, str]) -> tuple[str, str, str, str]:
+    return (normalize_date_for_sort(item.get(F_DATE, "")), normalize_time_for_sort(item.get(F_TIME, "")), item.get(F_COMPANY_ID, ""), item.get(F_SUBJECT, ""))
+
+
+def normalize_date_for_sort(value: str) -> str:
+    digits = re.sub(r"\D", "", value or "")
+    return digits if len(digits) == 8 else value
+
+
+def normalize_time_for_sort(value: str) -> str:
+    parts = re.findall(r"\d+", value or "")
+    if not parts:
+        return ""
+    hour = int(parts[0]) if len(parts) > 0 else 0
+    minute = int(parts[1]) if len(parts) > 1 else 0
+    second = int(parts[2]) if len(parts) > 2 else 0
+    return f"{hour:02d}:{minute:02d}:{second:02d}"
 
 
 def export_site(output_dir: Path, messages: list[dict[str, str]], generated_at: datetime) -> None:
