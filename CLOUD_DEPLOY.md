@@ -4,7 +4,8 @@
 
 - Google Cloud Scheduler triggers GitHub Actions every 5 minutes through the `workflow_dispatch` API.
 - GitHub Actions still keeps its own schedule as a fallback, but Google Cloud Scheduler is the primary scheduler.
-- The job runs `python sync_once_output.py`, then exports the public site with `python site_export.py`.
+- The job always runs `python sync_once_output.py` to check MOPS and update Google Sheet.
+- The public site is exported and deployed only when new MOPS rows are written, unless `force_deploy` is enabled manually.
 - Google Sheet keeps the full internal dataset.
 - `public/` contains only the semi-public static website.
 - Cloudflare Pages deploys the static website.
@@ -36,6 +37,10 @@ with this JSON body:
 ```json
 {"ref":"main"}
 ```
+
+This intentionally does not pass `force_deploy`, so routine 5-minute checks do not redeploy Cloudflare Pages when there are no new rows.
+
+To manually rebuild the website without new rows, open GitHub Actions, click `Run workflow`, and enable `force_deploy`.
 
 ## Public Website Fields
 
