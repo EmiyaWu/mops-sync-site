@@ -25,10 +25,10 @@ def main() -> int:
     credentials_path = prepare_credentials()
     spreadsheet = gspread.service_account(filename=credentials_path).open_by_key(sheet_id)
     now = datetime.now(ZoneInfo(os.getenv("TZ", "Asia/Taipei")))
-    rows = read_today_rows(spreadsheet, now)
+    rows, source_title = read_site_rows(spreadsheet, now)
     messages = rows_to_public_messages(rows)
-    export_site(output_dir, messages, now)
-    print(f"Exported {len(messages)} rows to {output_dir}")
+    export_site(output_dir, messages, now, source_title)
+    print(f"Exported {len(messages)} rows from {source_title or 'no worksheet'} to {output_dir}")
     return 0
 
 
@@ -45,6 +45,58 @@ def prepare_credentials() -> str:
 
 
 def read_today_rows(spreadsheet, now: datetime) -> list[list[str]]:
+    rows, _ = read_site_rows(spreadsheet, now)
+    return rows
+
+
+def read_site_rows(spreadsheet, now: datetime) -> tuple[list[list[str]], str]:
+    today_titles = [now.strftime("%Y/%m/%d"), now.strftime("%Y-%m-%d")]
+    first_existing_rows: list[list[str]] = []
+    first_existing_title = ""
+
+    for title in today_titles:
+        try:
+            rows = spreadsheet.worksheet(title).get_all_values()
+        except gspread.WorksheetNotFound:
+            continue
+        if not first_existing_rows:
+            first_existing_rows = rows
+            first_existing_title = title
+        if rows_have_data(rows):
+            return rows, title
+
+    date_worksheets = []
+    for worksheet in spreadsheet.worksheets():
+        parsed_date = parse_worksheet_date(worksheet.title)
+        if parsed_date is not None:
+            date_worksheets.append((parsed_date, worksheet))
+    date_worksheets.sort(key=lambda item: item[0], reverse=True)
+
+    for _, worksheet in date_worksheets:
+        if worksheet.title in today_titles:
+            continue
+        rows = worksheet.get_all_values()
+        if rows_have_data(rows):
+            return rows, worksheet.title
+
+    return first_existing_rows, first_existing_title
+
+
+def rows_have_data(rows: list[list[str]]) -> bool:
+    return len(rows) > 1 and any(any(cell.strip() for cell in row) for row in rows[1:])
+
+
+def parse_worksheet_date(title: str) -> datetime | None:
+    match = re.fullmatch(r"(\d{4})[/-](\d{2})[/-](\d{2})", title)
+    if not match:
+        return None
+    try:
+        return datetime(int(match.group(1)), int(match.group(2)), int(match.group(3)))
+    except ValueError:
+        return None
+
+
+def read_exact_worksheet_rows(spreadsheet, now: datetime) -> list[list[str]]:
     for title in (now.strftime("%Y/%m/%d"), now.strftime("%Y-%m-%d")):
         try:
             return spreadsheet.worksheet(title).get_all_values()
@@ -88,7 +140,7 @@ def normalize_time_for_sort(value: str) -> str:
     return f"{hour:02d}:{minute:02d}:{second:02d}"
 
 
-def export_site(output_dir: Path, messages: list[dict[str, str]], generated_at: datetime) -> None:
+def export_site(output_dir: Path, messages: list[dict[str, str]], generated_at: datetime, source_title: str = "") -> None:
     data_dir = output_dir / "data"
     assets_dir = output_dir / "assets"
     data_dir.mkdir(parents=True, exist_ok=True)
@@ -97,6 +149,7 @@ def export_site(output_dir: Path, messages: list[dict[str, str]], generated_at: 
     payload = {
         "generated_at": generated_at.isoformat(timespec="seconds"),
         "count": len(messages),
+        "source_title": source_title,
         "fields": PUBLIC_FIELDS,
         "messages": messages,
     }
@@ -126,7 +179,7 @@ INDEX_HTML = """<!doctype html>
         <p class="subtitle">\u81ea\u52d5\u540c\u6b65\u7576\u65e5\u4e0a\u5e02\u6ac3\u516c\u53f8\u91cd\u5927\u8a0a\u606f\uff0c\u986f\u793a\u516c\u53f8\u3001\u4e3b\u65e8\u8207\u8a73\u7d30\u5167\u5bb9\u3002</p>
       </div>
       <div class="metrics">
-        <div class="metric"><span>\u4eca\u65e5\u7b46\u6578</span><strong id="totalCount">0</strong></div>
+        <div class="metric"><span>\u986f\u793a\u7b46\u6578</span><strong id="totalCount">0</strong></div>
         <div class="metric wide"><span>\u6700\u5f8c\u66f4\u65b0</span><strong id="generatedAt">-</strong></div>
       </div>
     </section>
@@ -390,14 +443,13 @@ function render() {
     .filter((item) => normalize(item[FIELD_COMPANY_NAME]).includes(nameTerm))
     .filter((item) => `${normalize(item[FIELD_SUBJECT])} ${normalize(item[FIELD_DETAIL])}`.includes(subjectTerm))
     .sort((a, b) => {
-      const left = `${a[FIELD_DATE]} ${a[FIELD_TIME]}`;
-      const right = `${b[FIELD_DATE]} ${b[FIELD_TIME]}`;
       const leftKey = `${sortDate(a[FIELD_DATE])} ${sortTime(a[FIELD_TIME])}`;
       const rightKey = `${sortDate(b[FIELD_DATE])} ${sortTime(b[FIELD_TIME])}`;
       return newestFirst ? rightKey.localeCompare(leftKey) : leftKey.localeCompare(rightKey);
     });
   totalCount.textContent = String(filtered.length);
-  document.querySelector("#resultStatus").textContent = `\\u76ee\\u524d\\u986f\\u793a ${filtered.length} \\u7b46\\uff0f\\u4eca\\u65e5\\u5171 ${messages.length} \\u7b46`;
+  const sourceTitle = window.siteSourceTitle || "\\u6700\\u65b0\\u8cc7\\u6599";
+  document.querySelector("#resultStatus").textContent = `\\u76ee\\u524d\\u986f\\u793a ${filtered.length} \\u7b46\\uff0f${sourceTitle} \\u5171 ${messages.length} \\u7b46`;
   rowsBody.innerHTML = filtered.length
     ? filtered.map((item) => `
       <tr>
@@ -416,6 +468,7 @@ async function loadData() {
   const response = await fetch("data/latest.json", { cache: "no-store" });
   const data = await response.json();
   messages = data.messages || [];
+  window.siteSourceTitle = data.source_title || "";
   document.querySelector("#generatedAt").textContent = data.generated_at ? new Date(data.generated_at).toLocaleString("zh-TW", { hour12: false }) : "-";
   render();
 }
