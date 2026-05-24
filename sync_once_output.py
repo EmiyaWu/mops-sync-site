@@ -6,6 +6,7 @@ import re
 from pathlib import Path
 from typing import Any, Iterable
 
+import mos_s
 from line_notify import LineNotifier
 from mos_s import Config, GoogleSheetWriter, MOPSMessage, SpreadsheetNotFound, SyncService, configure_console_encoding, prepare_credentials_from_json_secret
 
@@ -51,6 +52,8 @@ def normalize_time_for_sort(value: str) -> str:
 
 def install_sheet_writer_patch() -> None:
     notifier = LineNotifier.from_env()
+    if hasattr(mos_s, "LineNotifier"):
+        mos_s.LineNotifier.from_env = classmethod(lambda cls: NoopNotifier())
 
     def append_messages(self: GoogleSheetWriter, worksheet_date, messages: list[MOPSMessage]) -> int:
         if not messages:
@@ -79,7 +82,7 @@ def main() -> int:
     prepare_credentials_from_json_secret()
     install_sheet_writer_patch()
     try:
-        new_rows = SyncService(Config.from_env(), notifier=NoopNotifier()).sync_once()
+        new_rows = SyncService(Config.from_env()).sync_once()
     except (SpreadsheetNotFound, FileNotFoundError, RuntimeError, ValueError) as exc:
         LOGGER.error("Execution failed: %s", exc)
         return 1
