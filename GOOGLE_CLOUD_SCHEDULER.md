@@ -76,6 +76,8 @@ User-Agent: google-cloud-scheduler-mops-sync
 {"ref":"main"}
 ```
 
+This body does not pass `force_deploy`, so normal 5-minute checks only deploy Cloudflare Pages when new MOPS rows are written.
+
 9. Authentication: leave disabled. The GitHub token in the `Authorization` header is the authentication for this request.
 
 ## 4. Validate
@@ -87,10 +89,11 @@ User-Agent: google-cloud-scheduler-mops-sync
 5. Confirm:
    - Google Sheet does not duplicate rows.
    - LINE only sends messages when new MOPS data is written.
-   - The website updates normally.
+   - The website updates normally when new rows exist.
 
 ## Notes
 
 - If both GitHub `schedule` and Google Cloud Scheduler trigger at similar times, `concurrency` prevents overlapping runs.
 - If duplicate workflow runs become noisy, remove the GitHub `schedule` trigger later and keep only `workflow_dispatch`.
+- If you want to rebuild the website even without new rows, run GitHub Actions manually and enable `force_deploy`.
 - Keep the GitHub token private. If it is exposed, revoke it and create a new token immediately.
