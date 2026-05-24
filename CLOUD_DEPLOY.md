@@ -19,8 +19,17 @@ In the GitHub repository, open `Settings -> Secrets and variables -> Actions`, t
 - `CLOUDFLARE_API_TOKEN`: Cloudflare Pages deploy token
 - `CLOUDFLARE_ACCOUNT_ID`: Cloudflare account ID
 - `CLOUDFLARE_PROJECT_NAME`: Cloudflare Pages project name
+- `LINE_CHANNEL_ACCESS_TOKEN`: LINE Messaging API channel access token
+- `LINE_NOTIFY_ENABLED`: set to `true` to send LINE notifications
+- `LINE_NOTIFY_MAX_INDIVIDUAL`: maximum individual messages to send per sync, for example `10`
 
 Do not commit `service-account.json` to GitHub.
+
+## LINE Broadcast Notifications
+
+GitHub Actions uses `LINE_NOTIFY_MODE=broadcast`, so every user who added the LINE Official Account as a friend can receive new MOPS notifications.
+
+`LINE_TARGET_IDS` is no longer required for cloud notifications unless you later change the workflow back to push mode.
 
 ## Google Cloud Scheduler
 
