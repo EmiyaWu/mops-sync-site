@@ -11,6 +11,7 @@ from curl_cffi import requests
 LOGGER = logging.getLogger("mops_sync")
 LINE_PUSH_URL = "https://api.line.me/v2/bot/message/push"
 DEFAULT_LINE_NOTIFY_MAX_INDIVIDUAL = 10
+DEFAULT_SITE_URL = "https://mops-sync-site.pages.dev/"
 
 
 class LineMessageLike(Protocol):
@@ -28,6 +29,7 @@ class LineNotifier:
         target_ids: Iterable[str] = (),
         enabled: bool = False,
         max_individual: int = DEFAULT_LINE_NOTIFY_MAX_INDIVIDUAL,
+        site_url: str = DEFAULT_SITE_URL,
         push_url: str = LINE_PUSH_URL,
         timeout_seconds: int = 15,
     ) -> None:
@@ -35,6 +37,7 @@ class LineNotifier:
         self.target_ids = [target_id.strip() for target_id in target_ids if target_id and target_id.strip()]
         self.enabled = enabled
         self.max_individual = max(max_individual, 0)
+        self.site_url = site_url.strip()
         self.push_url = push_url
         self.timeout_seconds = timeout_seconds
 
@@ -45,6 +48,7 @@ class LineNotifier:
             target_ids=os.getenv("LINE_TARGET_IDS", "").split(","),
             enabled=parse_bool(os.getenv("LINE_NOTIFY_ENABLED", "false")),
             max_individual=parse_int(os.getenv("LINE_NOTIFY_MAX_INDIVIDUAL"), DEFAULT_LINE_NOTIFY_MAX_INDIVIDUAL),
+            site_url=os.getenv("MOPS_SITE_URL", DEFAULT_SITE_URL),
         )
 
     def notify_new_messages(self, messages: list[LineMessageLike]) -> None:
@@ -80,7 +84,7 @@ class LineNotifier:
                 )
             )
         for message in sorted_messages[: self.max_individual]:
-            texts.append(format_line_message(message))
+            texts.append(format_line_message(message, self.site_url))
         return texts
 
     def _push_text(self, target_id: str, text: str) -> None:
@@ -96,12 +100,13 @@ class LineNotifier:
         response.raise_for_status()
 
 
-def format_line_message(message: LineMessageLike) -> str:
-    return (
+def format_line_message(message: LineMessageLike, site_url: str = DEFAULT_SITE_URL) -> str:
+    text = (
         "\u76ee\u524d\u6709\u65b0\u7684\u91cd\u5927\u5373\u6642\u8a0a\u606f!\n"
         f"\u516c\u53f8\u540d:{message.company_name}\n"
         f"\u4e3b\u65e8:{message.subject}"
     )
+    return f"{text}\n\u67e5\u770b\u7db2\u7ad9:{site_url.strip()}" if site_url.strip() else text
 
 
 def line_message_sort_key(message: LineMessageLike) -> tuple[str, str, str, str]:
