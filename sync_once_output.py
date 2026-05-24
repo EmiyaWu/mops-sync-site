@@ -8,6 +8,15 @@ from typing import Any, Iterable
 
 from mos_s import Config, GoogleSheetWriter, MOPSMessage, SpreadsheetNotFound, SyncService, configure_console_encoding, prepare_credentials_from_json_secret
 
+try:
+    from mos_s import LineNotifier
+
+    HAS_BUILT_IN_LINE_NOTIFIER = True
+except ImportError:
+    from line_notify import LineNotifier
+
+    HAS_BUILT_IN_LINE_NOTIFIER = False
+
 
 LOGGER = logging.getLogger("mops_sync")
 
@@ -43,26 +52,38 @@ def normalize_time_for_sort(value: str) -> str:
     return f"{hour:02d}:{minute:02d}:{second:02d}"
 
 
-def install_newest_first_sheet_writer() -> None:
+def install_sheet_writer_patch() -> None:
+    notifier = None if HAS_BUILT_IN_LINE_NOTIFIER else LineNotifier.from_env()
+
     def append_messages(self: GoogleSheetWriter, worksheet_date, messages: list[MOPSMessage]) -> int:
         if not messages:
             self.organize_daily_worksheets()
             return 0
         worksheet = self._get_or_create_daily_worksheet(worksheet_date)
         self._ensure_headers(worksheet)
-        rows = [message.to_sheet_row() for message in sort_messages_newest_first(messages)]
+        sorted_messages = sort_messages_newest_first(messages)
+        rows = [message.to_sheet_row() for message in sorted_messages]
         self._with_retry(lambda: worksheet.insert_rows(rows, row=2, value_input_option="USER_ENTERED"))
         self.organize_daily_worksheets()
+        if notifier is not None:
+            try:
+                notifier.notify_new_messages(sorted_messages)
+            except Exception as exc:
+                LOGGER.warning("LINE notification failed. Sheet sync remains complete: %s", exc)
         return len(messages)
 
     GoogleSheetWriter.append_messages = append_messages
+    if HAS_BUILT_IN_LINE_NOTIFIER:
+        LOGGER.info("Installed newest-first Sheet writer patch; LINE notifier is built into mos_s.py")
+    else:
+        LOGGER.info("Installed newest-first Sheet writer patch with LINE notification fallback")
 
 
 def main() -> int:
     configure_console_encoding()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s - %(message)s")
     prepare_credentials_from_json_secret()
-    install_newest_first_sheet_writer()
+    install_sheet_writer_patch()
     try:
         new_rows = SyncService(Config.from_env()).sync_once()
     except (SpreadsheetNotFound, FileNotFoundError, RuntimeError, ValueError) as exc:
