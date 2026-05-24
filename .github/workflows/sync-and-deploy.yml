@@ -3,7 +3,11 @@ name: Sync MOPS and Deploy Site
 on:
   workflow_dispatch:
   schedule:
-    - cron: "*/5 * * * *"
+    - cron: "2-59/5 * * * *"
+
+concurrency:
+  group: mops-sync-site
+  cancel-in-progress: false
 
 permissions:
   contents: read
