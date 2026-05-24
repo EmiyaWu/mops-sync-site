@@ -10,6 +10,7 @@ from curl_cffi import requests
 
 LOGGER = logging.getLogger("mops_sync")
 LINE_PUSH_URL = "https://api.line.me/v2/bot/message/push"
+LINE_BROADCAST_URL = "https://api.line.me/v2/bot/message/broadcast"
 DEFAULT_LINE_NOTIFY_MAX_INDIVIDUAL = 10
 DEFAULT_SITE_URL = "https://mops-sync-site.pages.dev/"
 
@@ -30,7 +31,9 @@ class LineNotifier:
         enabled: bool = False,
         max_individual: int = DEFAULT_LINE_NOTIFY_MAX_INDIVIDUAL,
         site_url: str = DEFAULT_SITE_URL,
+        notify_mode: str = "push",
         push_url: str = LINE_PUSH_URL,
+        broadcast_url: str = LINE_BROADCAST_URL,
         timeout_seconds: int = 15,
     ) -> None:
         self.channel_access_token = channel_access_token.strip()
@@ -38,7 +41,9 @@ class LineNotifier:
         self.enabled = enabled
         self.max_individual = max(max_individual, 0)
         self.site_url = site_url.strip()
+        self.notify_mode = normalize_notify_mode(notify_mode)
         self.push_url = push_url
+        self.broadcast_url = broadcast_url
         self.timeout_seconds = timeout_seconds
 
     @classmethod
@@ -49,6 +54,7 @@ class LineNotifier:
             enabled=parse_bool(os.getenv("LINE_NOTIFY_ENABLED", "false")),
             max_individual=parse_int(os.getenv("LINE_NOTIFY_MAX_INDIVIDUAL"), DEFAULT_LINE_NOTIFY_MAX_INDIVIDUAL),
             site_url=os.getenv("MOPS_SITE_URL", DEFAULT_SITE_URL),
+            notify_mode=os.getenv("LINE_NOTIFY_MODE", "push"),
         )
 
     def notify_new_messages(self, messages: list[LineMessageLike]) -> None:
@@ -60,11 +66,19 @@ class LineNotifier:
         if not self.channel_access_token:
             LOGGER.warning("LINE notification skipped: LINE_CHANNEL_ACCESS_TOKEN is missing")
             return
+        texts = self.build_notification_texts(messages)
+        if self.notify_mode == "broadcast":
+            for text in texts:
+                try:
+                    self._broadcast_text(text)
+                except Exception as exc:
+                    LOGGER.warning("LINE broadcast notification failed: %s", exc)
+            return
+
         if not self.target_ids:
             LOGGER.warning("LINE notification skipped: LINE_TARGET_IDS is missing")
             return
 
-        texts = self.build_notification_texts(messages)
         for target_id in self.target_ids:
             for text in texts:
                 try:
@@ -95,6 +109,18 @@ class LineNotifier:
                 "Content-Type": "application/json",
             },
             json={"to": target_id, "messages": [{"type": "text", "text": text}]},
+            timeout=self.timeout_seconds,
+        )
+        response.raise_for_status()
+
+    def _broadcast_text(self, text: str) -> None:
+        response = requests.post(
+            self.broadcast_url,
+            headers={
+                "Authorization": f"Bearer {self.channel_access_token}",
+                "Content-Type": "application/json",
+            },
+            json={"messages": [{"type": "text", "text": text}]},
             timeout=self.timeout_seconds,
         )
         response.raise_for_status()
@@ -138,6 +164,13 @@ def parse_int(value: str | None, default: int) -> int:
     except ValueError:
         LOGGER.warning("Invalid integer value %r, using default %s", value, default)
         return default
+
+
+def normalize_notify_mode(value: str | None) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized == "broadcast":
+        return "broadcast"
+    return "push"
 
 
 def mask_identifier(value: str) -> str:
