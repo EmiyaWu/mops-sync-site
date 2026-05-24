@@ -2,10 +2,11 @@
 
 ## Architecture
 
-- GitHub Actions runs every 5 minutes.
-- The job runs `python mos_s.py once --export-site public`, then `python site_export.py` to build the public dashboard.
+- Google Cloud Scheduler triggers GitHub Actions every 5 minutes through the `workflow_dispatch` API.
+- GitHub Actions still keeps its own schedule as a fallback, but Google Cloud Scheduler is the primary scheduler.
+- The job runs `python sync_once_output.py`, then exports the public site with `python site_export.py`.
 - Google Sheet keeps the full internal dataset.
-- `public/` contains the static website deployed to Cloudflare Pages.
+- `public/` contains only the semi-public static website.
 - Cloudflare Pages deploys the static website.
 
 ## GitHub Actions Secrets
@@ -20,9 +21,25 @@ In the GitHub repository, open `Settings -> Secrets and variables -> Actions`, t
 
 Do not commit `service-account.json` to GitHub.
 
+## Google Cloud Scheduler
+
+Use `GOOGLE_CLOUD_SCHEDULER.md` to create the external 5-minute scheduler.
+
+The scheduler calls:
+
+```text
+POST https://api.github.com/repos/EmiyaWu/mops-sync-site/actions/workflows/sync-and-deploy.yml/dispatches
+```
+
+with this JSON body:
+
+```json
+{"ref":"main"}
+```
+
 ## Public Website Fields
 
-The website exposes:
+The website exposes only:
 
 - Date
 - Time
@@ -40,7 +57,6 @@ The website does not expose:
 
 ```powershell
 python mos_s.py once --export-site public
-python site_export.py
 python -m http.server 8000 -d public
 ```
 
