@@ -42,6 +42,7 @@ jobs:
           LINE_TARGET_IDS: ${{ secrets.LINE_TARGET_IDS }}
           LINE_NOTIFY_ENABLED: ${{ secrets.LINE_NOTIFY_ENABLED }}
           LINE_NOTIFY_MAX_INDIVIDUAL: ${{ secrets.LINE_NOTIFY_MAX_INDIVIDUAL }}
+          MOPS_SITE_URL: https://mops-sync-site.pages.dev/
         run: python sync_once_output.py
 
       - name: Export public site
