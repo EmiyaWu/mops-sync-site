@@ -6,19 +6,16 @@ import re
 from pathlib import Path
 from typing import Any, Iterable
 
+from line_notify import LineNotifier
 from mos_s import Config, GoogleSheetWriter, MOPSMessage, SpreadsheetNotFound, SyncService, configure_console_encoding, prepare_credentials_from_json_secret
-
-try:
-    from mos_s import LineNotifier
-
-    HAS_BUILT_IN_LINE_NOTIFIER = True
-except ImportError:
-    from line_notify import LineNotifier
-
-    HAS_BUILT_IN_LINE_NOTIFIER = False
 
 
 LOGGER = logging.getLogger("mops_sync")
+
+
+class NoopNotifier:
+    def notify_new_messages(self, messages: list[MOPSMessage]) -> None:
+        return
 
 
 def write_github_output(name: str, value: Any) -> None:
@@ -53,7 +50,7 @@ def normalize_time_for_sort(value: str) -> str:
 
 
 def install_sheet_writer_patch() -> None:
-    notifier = None if HAS_BUILT_IN_LINE_NOTIFIER else LineNotifier.from_env()
+    notifier = LineNotifier.from_env()
 
     def append_messages(self: GoogleSheetWriter, worksheet_date, messages: list[MOPSMessage]) -> int:
         if not messages:
@@ -73,10 +70,7 @@ def install_sheet_writer_patch() -> None:
         return len(messages)
 
     GoogleSheetWriter.append_messages = append_messages
-    if HAS_BUILT_IN_LINE_NOTIFIER:
-        LOGGER.info("Installed newest-first Sheet writer patch; LINE notifier is built into mos_s.py")
-    else:
-        LOGGER.info("Installed newest-first Sheet writer patch with LINE notification fallback")
+    LOGGER.info("Installed newest-first Sheet writer patch with line_notify notifier")
 
 
 def main() -> int:
@@ -85,7 +79,7 @@ def main() -> int:
     prepare_credentials_from_json_secret()
     install_sheet_writer_patch()
     try:
-        new_rows = SyncService(Config.from_env()).sync_once()
+        new_rows = SyncService(Config.from_env(), notifier=NoopNotifier()).sync_once()
     except (SpreadsheetNotFound, FileNotFoundError, RuntimeError, ValueError) as exc:
         LOGGER.error("Execution failed: %s", exc)
         return 1
