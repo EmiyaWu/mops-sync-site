@@ -2,6 +2,12 @@ name: Sync MOPS and Deploy Site
 
 on:
   workflow_dispatch:
+    inputs:
+      force_deploy:
+        description: "Export and deploy the site even when no new MOPS rows were found"
+        required: false
+        type: boolean
+        default: false
   schedule:
     - cron: "2,7,12,17,22,27,32,37,42,47,52,57 * * * *"
 
@@ -50,6 +56,7 @@ jobs:
         run: python sync_once_output.py
 
       - name: Export public site
+        if: ${{ steps.sync.outputs.has_new_rows == 'true' || github.event.inputs.force_deploy == 'true' }}
         env:
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           MOPS_SHEET_ID: ${{ secrets.MOPS_SHEET_ID }}
@@ -57,13 +64,18 @@ jobs:
         run: python site_export.py
 
       - name: Upload static site artifact
+        if: ${{ steps.sync.outputs.has_new_rows == 'true' || github.event.inputs.force_deploy == 'true' }}
         uses: actions/upload-artifact@v4
         with:
           name: mops-public-site
           path: public
 
+      - name: Skip site deploy
+        if: ${{ steps.sync.outputs.has_new_rows != 'true' && github.event.inputs.force_deploy != 'true' }}
+        run: echo "No new MOPS rows found. Skipping site export and Cloudflare Pages deploy."
+
       - name: Verify Cloudflare settings
-        if: ${{ env.CLOUDFLARE_API_TOKEN != '' && env.CLOUDFLARE_ACCOUNT_ID != '' && env.CLOUDFLARE_PROJECT_NAME != '' }}
+        if: ${{ (steps.sync.outputs.has_new_rows == 'true' || github.event.inputs.force_deploy == 'true') && env.CLOUDFLARE_API_TOKEN != '' && env.CLOUDFLARE_ACCOUNT_ID != '' && env.CLOUDFLARE_PROJECT_NAME != '' }}
         run: |
           test -d public
           find public -maxdepth 3 -type f | sort
@@ -77,7 +89,7 @@ jobs:
           PY
 
       - name: Deploy to Cloudflare Pages
-        if: ${{ env.CLOUDFLARE_API_TOKEN != '' && env.CLOUDFLARE_ACCOUNT_ID != '' && env.CLOUDFLARE_PROJECT_NAME != '' }}
+        if: ${{ (steps.sync.outputs.has_new_rows == 'true' || github.event.inputs.force_deploy == 'true') && env.CLOUDFLARE_API_TOKEN != '' && env.CLOUDFLARE_ACCOUNT_ID != '' && env.CLOUDFLARE_PROJECT_NAME != '' }}
         run: |
           npm install --global wrangler@latest
           wrangler --version
