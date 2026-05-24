@@ -28,6 +28,8 @@ def main() -> int:
     rows, source_title = read_site_rows(spreadsheet, now)
     messages = rows_to_public_messages(rows)
     export_site(output_dir, messages, now, source_title)
+    write_github_output("public_count", len(messages))
+    write_github_output("source_title", source_title)
     print(f"Exported {len(messages)} rows from {source_title or 'no worksheet'} to {output_dir}")
     return 0
 
@@ -42,6 +44,14 @@ def prepare_credentials() -> str:
     credentials_path.parent.mkdir(parents=True, exist_ok=True)
     credentials_path.write_text(secret, encoding="utf-8")
     return str(credentials_path)
+
+
+def write_github_output(name: str, value: object) -> None:
+    output_path = os.getenv("GITHUB_OUTPUT")
+    if not output_path:
+        return
+    with Path(output_path).open("a", encoding="utf-8") as output_file:
+        output_file.write(f"{name}={value}\n")
 
 
 def read_today_rows(spreadsheet, now: datetime) -> list[list[str]]:
@@ -362,15 +372,41 @@ tbody tr:hover td { background: var(--panel-soft); }
 td:nth-child(1) { width: 96px; color: var(--accent-strong); font-weight: 800; white-space: nowrap; }
 td:nth-child(2) { width: 116px; font-variant-numeric: tabular-nums; }
 td:nth-child(3) { width: 136px; font-weight: 700; }
-td.subject { line-height: 1.6; }
+td.subject { line-height: 1.6; min-width: 0; }
 td.subject strong {
   display: inline-block;
   margin-bottom: 7px;
   color: #111827;
   font-size: 15px;
   border-bottom: 2px solid rgba(8, 114, 111, 0.18);
+  overflow-wrap: anywhere;
 }
-td.subject p { margin: 0; color: #43514f; white-space: pre-wrap; }
+.detail-content { min-width: 0; max-width: 100%; color: #43514f; }
+.detail-text {
+  margin: 0;
+  color: #43514f;
+  line-height: 1.75;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.detail-table {
+  max-width: 100%;
+  margin: 10px 0;
+  padding: 10px 12px;
+  overflow-x: auto;
+  background: #f7faf9;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  -webkit-overflow-scrolling: touch;
+}
+.detail-table pre {
+  min-width: max-content;
+  margin: 0;
+  color: #22302d;
+  font: 12px/1.55 "Cascadia Mono", "Consolas", "Menlo", monospace;
+  white-space: pre;
+}
 .empty-row td { padding: 30px 14px; color: var(--muted); text-align: center; }
 @media (max-width: 760px) {
   .app-shell { width: min(100% - 20px, 1280px); padding-top: 16px; }
@@ -383,6 +419,9 @@ td.subject p { margin: 0; color: #43514f; white-space: pre-wrap; }
   table, thead, tbody, tr, th, td { display: block; }
   thead { display: none; }
   tr {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px 12px;
     margin-bottom: 10px;
     padding: 13px 14px;
     background: var(--panel);
@@ -390,9 +429,39 @@ td.subject p { margin: 0; color: #43514f; white-space: pre-wrap; }
     border-radius: 8px;
     box-shadow: 0 10px 24px rgba(20, 32, 31, 0.055);
   }
-  td { display: grid; grid-template-columns: 92px 1fr; gap: 10px; width: auto !important; padding: 5px 0; border-bottom: 0; background: transparent; }
-  td::before { content: attr(data-label); color: var(--muted); font-weight: 800; }
-  td.subject strong { margin-bottom: 6px; }
+  td {
+    display: block;
+    width: auto !important;
+    min-width: 0;
+    padding: 0;
+    border-bottom: 0;
+    background: transparent;
+  }
+  td::before {
+    content: attr(data-label);
+    display: block;
+    margin-bottom: 4px;
+    color: var(--muted);
+    font-size: 13px;
+    font-weight: 800;
+  }
+  td:nth-child(1), td:nth-child(2), td:nth-child(3) { width: auto; white-space: normal; }
+  td.subject {
+    grid-column: 1 / -1;
+    margin-top: 4px;
+    padding-top: 12px;
+    border-top: 1px solid var(--line-soft);
+  }
+  td.subject strong {
+    display: block;
+    margin-bottom: 10px;
+    padding-bottom: 8px;
+    font-size: 18px;
+    line-height: 1.6;
+  }
+  .detail-text { font-size: 16px; line-height: 1.85; }
+  .detail-table { margin: 12px 0; padding: 9px 10px; }
+  .detail-table pre { font-size: 11px; line-height: 1.6; }
 }
 """
 
@@ -434,6 +503,36 @@ function escapeHtml(value) {
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
 }
+function looksLikeTableLine(line) {
+  const trimmed = String(line || "").trim();
+  if (!trimmed) return false;
+  return trimmed.length >= 12 && (/={4,}/.test(trimmed) || /\t/.test(line) || / {2,}/.test(line));
+}
+function renderTextBlock(lines) {
+  return lines.length ? `<div class="detail-text">${escapeHtml(lines.join("\\n"))}</div>` : "";
+}
+function renderTableBlock(lines) {
+  return lines.length ? `<div class="detail-table"><pre>${escapeHtml(lines.join("\\n"))}</pre></div>` : "";
+}
+function formatDetail(value) {
+  const lines = String(value || "").replace(/\\r\\n/g, "\\n").replace(/\\r/g, "\\n").split("\\n");
+  const parts = [];
+  let block = [];
+  let tableMode = false;
+  function flush() {
+    if (!block.length) return;
+    parts.push(tableMode ? renderTableBlock(block) : renderTextBlock(block));
+    block = [];
+  }
+  for (const line of lines) {
+    const nextTableMode = looksLikeTableLine(line);
+    if (block.length && nextTableMode !== tableMode) flush();
+    tableMode = nextTableMode;
+    block.push(line);
+  }
+  flush();
+  return parts.join("");
+}
 function render() {
   const idTerm = normalize(companyIdFilter.value);
   const nameTerm = normalize(companyNameFilter.value);
@@ -443,6 +542,8 @@ function render() {
     .filter((item) => normalize(item[FIELD_COMPANY_NAME]).includes(nameTerm))
     .filter((item) => `${normalize(item[FIELD_SUBJECT])} ${normalize(item[FIELD_DETAIL])}`.includes(subjectTerm))
     .sort((a, b) => {
+      const left = `${a[FIELD_DATE]} ${a[FIELD_TIME]}`;
+      const right = `${b[FIELD_DATE]} ${b[FIELD_TIME]}`;
       const leftKey = `${sortDate(a[FIELD_DATE])} ${sortTime(a[FIELD_TIME])}`;
       const rightKey = `${sortDate(b[FIELD_DATE])} ${sortTime(b[FIELD_TIME])}`;
       return newestFirst ? rightKey.localeCompare(leftKey) : leftKey.localeCompare(rightKey);
@@ -458,7 +559,7 @@ function render() {
         <td data-label="\\u516c\\u53f8\\u7c21\\u7a31">${escapeHtml(item[FIELD_COMPANY_NAME])}</td>
         <td data-label="\\u4e3b\\u65e8\\u8207\\u8a73\\u7d30\\u5167\\u5bb9" class="subject">
           <strong>${escapeHtml(item[FIELD_SUBJECT])}</strong>
-          <p>${escapeHtml(item[FIELD_DETAIL])}</p>
+          <div class="detail-content">${formatDetail(item[FIELD_DETAIL])}</div>
         </td>
       </tr>
     `).join("")
