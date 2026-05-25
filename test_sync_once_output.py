@@ -27,6 +27,7 @@ def data_key(item: dict) -> str:
 class FakeOptimizedMOPSClient:
     list_items: list[dict] = []
     fail_detail = False
+    malformed_detail = False
     detail_calls: list[dict] = []
 
     def __init__(self) -> None:
@@ -39,6 +40,8 @@ class FakeOptimizedMOPSClient:
         self.detail_calls.append(params)
         if self.fail_detail:
             raise RuntimeError("detail failed")
+        if self.malformed_detail:
+            raise AttributeError("'NoneType' object has no attribute 'get'")
         return f"detail-{params['serialNumber']}"
 
     @staticmethod
@@ -75,6 +78,7 @@ class OptimizedCloudSyncTest(unittest.TestCase):
         sync_once_output.GoogleSheetWriter = FakeOptimizedSheetWriter
         FakeOptimizedMOPSClient.list_items = []
         FakeOptimizedMOPSClient.fail_detail = False
+        FakeOptimizedMOPSClient.malformed_detail = False
         FakeOptimizedMOPSClient.detail_calls = []
         FakeOptimizedSheetWriter.existing = set()
         FakeOptimizedSheetWriter.appended = []
@@ -145,6 +149,16 @@ class OptimizedCloudSyncTest(unittest.TestCase):
                 sync_once_output.sync_once_optimized(self.make_config(tmpdir))
 
         self.assertEqual(FakeOptimizedSheetWriter.appended, [])
+
+    def test_malformed_detail_response_continues_with_empty_detail(self) -> None:
+        FakeOptimizedMOPSClient.list_items = [make_item("2330", "2026/05/25", "15:02", "2", "new")]
+        FakeOptimizedMOPSClient.malformed_detail = True
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            new_rows = sync_once_output.sync_once_optimized(self.make_config(tmpdir))
+
+        self.assertEqual(new_rows, 1)
+        self.assertEqual(FakeOptimizedSheetWriter.appended[0].detail, "No detail returned")
 
 
 if __name__ == "__main__":
