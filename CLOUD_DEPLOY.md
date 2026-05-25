@@ -40,6 +40,18 @@ The subscriber sheet must not be public. Share it only with your own account and
 
 ## LINE Subscriber Webhook
 
+Use `line_webhook_worker.js` as the LINE webhook endpoint, and keep `line_webhook.gs` as the Google Sheet writer.
+
+Flow:
+
+```text
+LINE -> Cloudflare Worker -> Google Apps Script -> private subscriber Sheet
+```
+
+LINE must call Cloudflare Worker, not Apps Script directly. Apps Script can return `302 Found` to LINE webhook verification, while the Worker returns `200 OK` directly and verifies LINE's `X-Line-Signature`.
+
+### Google Apps Script
+
 Use `line_webhook.gs` in a Google Apps Script project to collect LINE Messaging API user IDs automatically.
 
 Apps Script properties:
@@ -53,13 +65,26 @@ Deploy the Apps Script as a web app:
 - Execute as: Me
 - Who has access: Anyone
 
-Then set the LINE Developers webhook URL to:
+Keep the Apps Script web app URL for the Worker variable below. It must include the secret query string, for example:
 
 ```text
 https://script.google.com/macros/s/DEPLOYMENT_ID/exec?secret=LINE_WEBHOOK_SECRET_VALUE
 ```
 
-Apps Script web apps do not expose request headers to `doPost`, so this implementation uses the `LINE_WEBHOOK_SECRET` URL token instead of LINE's `X-Line-Signature` header. If full LINE signature verification is required later, move the webhook to Cloudflare Workers or another HTTP runtime that exposes request headers.
+### Cloudflare Worker
+
+Create a Cloudflare Worker and paste `line_webhook_worker.js`.
+
+Worker variables and secrets:
+
+- `LINE_CHANNEL_SECRET`: LINE Messaging API channel secret
+- `APPS_SCRIPT_WEBHOOK_URL`: full Apps Script web app URL, including the secret query string
+
+After deploying the Worker, set LINE Developers `Webhook URL` to the Worker URL and click `Verify`:
+
+```text
+https://YOUR_WORKER_NAME.YOUR_SUBDOMAIN.workers.dev/
+```
 
 ## Google Cloud Scheduler
 
