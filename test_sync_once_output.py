@@ -121,6 +121,21 @@ class OptimizedCloudSyncTest(unittest.TestCase):
         self.assertEqual(len(FakeOptimizedSheetWriter.appended), 3)
         self.assertEqual([message.detail for message in FakeOptimizedSheetWriter.appended], ["detail-2", "detail-3", "detail-4"])
 
+    def test_excluded_subjects_are_skipped_before_detail_fetch(self) -> None:
+        FakeOptimizedMOPSClient.list_items = [
+            make_item("2330", "2026/05/25", "15:02", "2", "\u516c\u544a\u672c\u516c\u53f8\u8463\u4e8b\u6703\u6c7a\u8b70\u53ec\u958b\u80a1\u6771\u5e38\u6703"),
+            make_item("2317", "2026/05/25", "15:03", "3", "\u516c\u544a\u672c\u516c\u53f8\u5be9\u8a08\u59d4\u54e1\u6703\u59d4\u54e1\u7570\u52d5"),
+            make_item("2454", "2026/05/25", "15:04", "4", "\u91cd\u5927\u8a0a\u606f"),
+        ]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            new_rows = sync_once_output.sync_once_optimized(self.make_config(tmpdir))
+
+        self.assertEqual(new_rows, 1)
+        self.assertEqual(len(FakeOptimizedMOPSClient.detail_calls), 1)
+        self.assertEqual(FakeOptimizedMOPSClient.detail_calls[0]["serialNumber"], "4")
+        self.assertEqual([message.subject for message in FakeOptimizedSheetWriter.appended], ["\u91cd\u5927\u8a0a\u606f"])
+
     def test_detail_failure_does_not_append_partial_rows(self) -> None:
         FakeOptimizedMOPSClient.list_items = [make_item("2330", "2026/05/25", "15:02", "2", "new")]
         FakeOptimizedMOPSClient.fail_detail = True
