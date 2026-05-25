@@ -23,8 +23,8 @@ In the GitHub repository, open `Settings -> Secrets and variables -> Actions`, t
 - `LINE_NOTIFY_ENABLED`: set to `true` to send LINE notifications
 - `LINE_NOTIFY_MAX_INDIVIDUAL`: maximum individual messages to send per sync, for example `10`
 - `LINE_NOTIFY_INTERVAL_SECONDS`: optional minimum seconds between LINE notification sends, default `600`
-- `LINE_NOTIFY_ACTIVE_START_HOUR`: optional first hour for LINE notifications, default `8`
-- `LINE_NOTIFY_ACTIVE_END_HOUR`: optional stop hour for LINE notifications, default `20`
+- `LINE_NOTIFY_ACTIVE_START_HOUR`: optional first hour for LINE notifications, default `0`
+- `LINE_NOTIFY_ACTIVE_END_HOUR`: optional stop hour for LINE notifications, default `0`
 - `LINE_TARGET_IDS`: optional admin fallback user IDs, separated by commas
 - `LINE_SUBSCRIBERS_SHEET_ID`: private Google Sheet ID used for LINE subscriber fallback
 
@@ -36,7 +36,7 @@ GitHub Actions uses `LINE_NOTIFY_MODE=broadcast`, so every user who added the LI
 
 New MOPS rows are first stored in `line_notify_queue` in the private subscriber Sheet. GitHub Actions still checks MOPS every 5 minutes, but LINE sends at most once every 10 minutes by default.
 
-LINE notifications are sent only during the active window, default `08:00-20:00 Asia/Taipei`. New rows outside this window stay queued and are retried during the next active window.
+LINE notifications can be sent all day by default. Setting `LINE_NOTIFY_ACTIVE_START_HOUR` and `LINE_NOTIFY_ACTIVE_END_HOUR` to the same value disables the active-hours restriction.
 
 If LINE broadcast is rate-limited, pending notifications stay in the queue and are retried after the interval instead of being sent again immediately. Fallback recipients are loaded from:
 
