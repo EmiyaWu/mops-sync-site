@@ -18,10 +18,12 @@ from mos_s import (
     F_SUBJECT,
     F_TIME,
     GoogleSheetWriter,
+    LineNotifier,
     MOPSMessage,
     MessageNormalizer,
     SiteExporter,
     SyncService,
+    format_line_message,
     parse_worksheet_date,
 )
 from site_export import read_site_rows
@@ -58,6 +60,17 @@ class FakeGoogleSheetWriter:
 
     def organize_daily_worksheets(self) -> None:
         self.organized_count += 1
+
+
+class FakeLineNotifier:
+    def __init__(self, fail: bool = False) -> None:
+        self.fail = fail
+        self.notified: list[MOPSMessage] = []
+
+    def notify_new_messages(self, messages: list[MOPSMessage]) -> None:
+        if self.fail:
+            raise RuntimeError("LINE failed")
+        self.notified.extend(messages)
 
 
 class FakeWorksheet:
@@ -199,6 +212,66 @@ class SiteExporterTest(unittest.TestCase):
         self.assertEqual(rows[1][1], "15:02:03")
 
 
+class LineNotifierTest(unittest.TestCase):
+    def test_formats_single_line_message(self) -> None:
+        self.assertEqual(
+            format_line_message(make_message("key-1")),
+            f"\u76ee\u524d\u6709\u65b0\u7684\u91cd\u5927\u5373\u6642\u8a0a\u606f!\n\u516c\u53f8\u540d:{COMPANY_NAME}\n\u4e3b\u65e8:{SUBJECT}\n\u67e5\u770b\u7db2\u7ad9:https://mops-sync-site.pages.dev/",
+        )
+
+    def test_builds_individual_notifications_for_multiple_messages(self) -> None:
+        notifier = LineNotifier(enabled=True, channel_access_token="token", target_ids=["user"], max_individual=10)
+
+        texts = notifier.build_notification_texts([make_message("older", "09:01"), make_message("newer", "15:02")])
+
+        self.assertEqual(len(texts), 2)
+        self.assertIn("\u516c\u53f8\u540d:", texts[0])
+        self.assertIn("\u4e3b\u65e8:", texts[0])
+
+    def test_builds_summary_when_message_count_exceeds_limit(self) -> None:
+        notifier = LineNotifier(enabled=True, channel_access_token="token", target_ids=["user"], max_individual=2)
+        messages = [make_message(f"key-{index}", f"09:0{index}") for index in range(3)]
+
+        texts = notifier.build_notification_texts(messages)
+
+        self.assertEqual(len(texts), 3)
+        self.assertIn("3", texts[0])
+        self.assertIn("2", texts[0])
+
+    def test_broadcast_mode_does_not_require_target_ids(self) -> None:
+        notifier = LineNotifier(enabled=True, channel_access_token="token", notify_mode="broadcast")
+        sent_texts: list[str] = []
+        notifier._broadcast_text = sent_texts.append
+
+        notifier.notify_new_messages([make_message("key-1")])
+
+        self.assertEqual(len(sent_texts), 1)
+        self.assertIn("\u516c\u53f8\u540d:", sent_texts[0])
+
+    def test_broadcast_mode_sends_one_combined_message(self) -> None:
+        notifier = LineNotifier(enabled=True, channel_access_token="token", notify_mode="broadcast", max_individual=3)
+        sent_texts: list[str] = []
+        notifier._broadcast_text = sent_texts.append
+        messages = [make_message(f"key-{index}", f"15:0{index}") for index in range(7)]
+
+        notifier.notify_new_messages(messages)
+
+        self.assertEqual(len(sent_texts), 1)
+        self.assertIn("7", sent_texts[0])
+        self.assertIn("3", sent_texts[0])
+        self.assertIn("\u5176\u9918 4 \u7b46", sent_texts[0])
+        self.assertIn("https://mops-sync-site.pages.dev/", sent_texts[0])
+
+    def test_push_mode_requires_target_ids(self) -> None:
+        notifier = LineNotifier(enabled=True, channel_access_token="token", notify_mode="push")
+        sent_texts: list[str] = []
+        notifier._broadcast_text = sent_texts.append
+
+        notifier.notify_new_messages([make_message("key-1")])
+
+        self.assertEqual(sent_texts, [])
+
+
 class GoogleSheetWriterTest(unittest.TestCase):
     def test_inserts_new_rows_below_header_newest_first(self) -> None:
         worksheet = FakeWorksheet()
@@ -238,23 +311,37 @@ class SyncServiceTest(unittest.TestCase):
     def test_sync_once_appends_only_new_messages(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             writer = FakeGoogleSheetWriter(existing_keys={"key-1"})
-            service = SyncService(self.make_config(tmpdir), client=FakeMOPSClient([make_message("key-1"), make_message("key-2")]), writer=writer)
+            notifier = FakeLineNotifier()
+            service = SyncService(self.make_config(tmpdir), client=FakeMOPSClient([make_message("key-1"), make_message("key-2")]), writer=writer, notifier=notifier)
 
             appended_count = service.sync_once()
 
             self.assertEqual(appended_count, 1)
             self.assertEqual([message.data_key for message in writer.appended], ["key-2"])
+            self.assertEqual([message.data_key for message in notifier.notified], ["key-2"])
 
     def test_sync_once_does_not_write_when_no_new_messages(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             writer = FakeGoogleSheetWriter(existing_keys={"key-1"})
-            service = SyncService(self.make_config(tmpdir), client=FakeMOPSClient([make_message("key-1")]), writer=writer)
+            notifier = FakeLineNotifier()
+            service = SyncService(self.make_config(tmpdir), client=FakeMOPSClient([make_message("key-1")]), writer=writer, notifier=notifier)
 
             appended_count = service.sync_once()
 
             self.assertEqual(appended_count, 0)
             self.assertEqual(writer.appended, [])
             self.assertEqual(writer.organized_count, 1)
+            self.assertEqual(notifier.notified, [])
+
+    def test_sync_once_keeps_sheet_success_when_line_notification_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            writer = FakeGoogleSheetWriter()
+            service = SyncService(self.make_config(tmpdir), client=FakeMOPSClient([make_message("key-1")]), writer=writer, notifier=FakeLineNotifier(fail=True))
+
+            appended_count = service.sync_once()
+
+            self.assertEqual(appended_count, 1)
+            self.assertEqual([message.data_key for message in writer.appended], ["key-1"])
 
     def test_sync_once_exports_site_even_when_no_new_messages(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
