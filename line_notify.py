@@ -6,6 +6,7 @@ import re
 import time
 from datetime import datetime, timezone
 from typing import Iterable, Protocol
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from curl_cffi import requests
 
@@ -32,7 +33,10 @@ SUBSCRIBER_USER_ID = "user_id"
 SUBSCRIBER_STATUS = "status"
 NOTIFICATION_QUEUE_WORKSHEET_TITLE = "line_notify_queue"
 NOTIFICATION_STATE_WORKSHEET_TITLE = "line_notify_state"
-DEFAULT_LINE_NOTIFY_INTERVAL_SECONDS = 900
+DEFAULT_LINE_NOTIFY_INTERVAL_SECONDS = 7200
+DEFAULT_LINE_NOTIFY_ACTIVE_START_HOUR = 8
+DEFAULT_LINE_NOTIFY_ACTIVE_END_HOUR = 20
+DEFAULT_LINE_NOTIFY_TIMEZONE = "Asia/Taipei"
 
 
 class LineMessageLike(Protocol):
@@ -229,10 +233,16 @@ class QueuedLineNotifier:
         notifier: LineNotifier,
         queue_store: "LineNotificationQueueStore | None" = None,
         interval_seconds: int = DEFAULT_LINE_NOTIFY_INTERVAL_SECONDS,
+        active_start_hour: int = DEFAULT_LINE_NOTIFY_ACTIVE_START_HOUR,
+        active_end_hour: int = DEFAULT_LINE_NOTIFY_ACTIVE_END_HOUR,
+        timezone_name: str = DEFAULT_LINE_NOTIFY_TIMEZONE,
     ) -> None:
         self.notifier = notifier
         self.queue_store = queue_store
         self.interval_seconds = max(interval_seconds, 0)
+        self.active_start_hour = clamp_hour(active_start_hour, DEFAULT_LINE_NOTIFY_ACTIVE_START_HOUR)
+        self.active_end_hour = clamp_hour(active_end_hour, DEFAULT_LINE_NOTIFY_ACTIVE_END_HOUR)
+        self.timezone_name = timezone_name.strip() or DEFAULT_LINE_NOTIFY_TIMEZONE
 
     @classmethod
     def from_env(cls) -> "QueuedLineNotifier":
@@ -240,6 +250,9 @@ class QueuedLineNotifier:
             notifier=LineNotifier.from_env(),
             queue_store=LineNotificationQueueStore.from_env(),
             interval_seconds=parse_int(os.getenv("LINE_NOTIFY_INTERVAL_SECONDS"), DEFAULT_LINE_NOTIFY_INTERVAL_SECONDS),
+            active_start_hour=parse_int(os.getenv("LINE_NOTIFY_ACTIVE_START_HOUR"), DEFAULT_LINE_NOTIFY_ACTIVE_START_HOUR),
+            active_end_hour=parse_int(os.getenv("LINE_NOTIFY_ACTIVE_END_HOUR"), DEFAULT_LINE_NOTIFY_ACTIVE_END_HOUR),
+            timezone_name=os.getenv("LINE_NOTIFY_TIMEZONE", os.getenv("TZ", DEFAULT_LINE_NOTIFY_TIMEZONE)),
         )
 
     def notify_new_messages(self, messages: list[LineMessageLike]) -> bool:
@@ -254,6 +267,15 @@ class QueuedLineNotifier:
             return False
         pending = self.queue_store.pending_messages()
         if not pending:
+            return False
+        if not force and not is_active_notification_hour(self.active_start_hour, self.active_end_hour, self.timezone_name):
+            LOGGER.info(
+                "LINE notification queue has %s pending message(s), outside active hours %02d:00-%02d:00 %s",
+                len(pending),
+                self.active_start_hour,
+                self.active_end_hour,
+                self.timezone_name,
+            )
             return False
         if not force and not self.queue_store.is_due(self.interval_seconds):
             LOGGER.info("LINE notification queue has %s pending message(s), waiting for interval", len(pending))
@@ -516,6 +538,26 @@ def parse_int(value: str | None, default: int) -> int:
     except ValueError:
         LOGGER.warning("Invalid integer value %r, using default %s", value, default)
         return default
+
+
+def clamp_hour(value: int, default: int) -> int:
+    return value if 0 <= value <= 23 else default
+
+
+def is_active_notification_hour(start_hour: int, end_hour: int, timezone_name: str) -> bool:
+    try:
+        tz = ZoneInfo(timezone_name)
+    except ZoneInfoNotFoundError:
+        LOGGER.warning("Invalid LINE notify timezone %r, using %s", timezone_name, DEFAULT_LINE_NOTIFY_TIMEZONE)
+        tz = ZoneInfo(DEFAULT_LINE_NOTIFY_TIMEZONE)
+    current_hour = datetime.now(tz).hour
+    start = clamp_hour(start_hour, DEFAULT_LINE_NOTIFY_ACTIVE_START_HOUR)
+    end = clamp_hour(end_hour, DEFAULT_LINE_NOTIFY_ACTIVE_END_HOUR)
+    if start == end:
+        return True
+    if start < end:
+        return start <= current_hour < end
+    return current_hour >= start or current_hour < end
 
 
 def default_credentials_path() -> str | None:
