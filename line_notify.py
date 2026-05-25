@@ -4,6 +4,7 @@ import logging
 import os
 import re
 import time
+from datetime import datetime, timezone
 from typing import Iterable, Protocol
 
 from curl_cffi import requests
@@ -29,6 +30,9 @@ DEFAULT_SITE_URL = "https://mops-sync-site.pages.dev/"
 SUBSCRIBER_WORKSHEET_TITLE = "line_subscribers"
 SUBSCRIBER_USER_ID = "user_id"
 SUBSCRIBER_STATUS = "status"
+NOTIFICATION_QUEUE_WORKSHEET_TITLE = "line_notify_queue"
+NOTIFICATION_STATE_WORKSHEET_TITLE = "line_notify_state"
+DEFAULT_LINE_NOTIFY_INTERVAL_SECONDS = 900
 
 
 class LineMessageLike(Protocol):
@@ -85,32 +89,33 @@ class LineNotifier:
             subscriber_store=SubscriberStore.from_env(),
         )
 
-    def notify_new_messages(self, messages: list[LineMessageLike]) -> None:
+    def notify_new_messages(self, messages: list[LineMessageLike]) -> bool:
         if not messages:
-            return
+            return False
         if not self.enabled:
             LOGGER.info("LINE notification disabled")
-            return
+            return False
         if not self.channel_access_token:
             LOGGER.warning("LINE notification skipped: LINE_CHANNEL_ACCESS_TOKEN is missing")
-            return
+            return False
         if self.notify_mode == "broadcast":
             text = self.build_broadcast_text(messages)
-            if not self._try_broadcast_text(text):
-                self._fallback_push_text(text)
-            return
+            return self._try_broadcast_text(text) or self._fallback_push_text(text)
 
         if not self.target_ids:
             LOGGER.warning("LINE notification skipped: LINE_TARGET_IDS is missing")
-            return
+            return False
 
         texts = self.build_notification_texts(messages)
+        sent_any = False
         for target_id in self.target_ids:
             for text in texts:
                 try:
                     self._push_text(target_id, text)
+                    sent_any = True
                 except Exception as exc:
                     LOGGER.warning("LINE notification failed for target %s: %s", mask_identifier(target_id), exc)
+        return sent_any
 
     def build_notification_texts(self, messages: list[LineMessageLike]) -> list[str]:
         sorted_messages = sorted(messages, key=line_message_sort_key, reverse=True)
@@ -192,17 +197,20 @@ class LineNotifier:
                 return False
         return False
 
-    def _fallback_push_text(self, text: str) -> None:
+    def _fallback_push_text(self, text: str) -> bool:
         recipients = self._fallback_target_ids()
         if not recipients:
             LOGGER.warning("LINE broadcast failed and LINE_TARGET_IDS is missing; no fallback recipients")
-            return
+            return False
         LOGGER.warning("LINE broadcast failed; fallback pushing summary to %s configured target(s)", len(recipients))
+        sent_any = False
         for target_id in recipients:
             try:
                 self._push_text(target_id, text)
+                sent_any = True
             except Exception as exc:
                 LOGGER.warning("LINE fallback push failed for target %s: %s", mask_identifier(target_id), exc)
+        return sent_any
 
     def _fallback_target_ids(self) -> list[str]:
         subscriber_ids: list[str] = []
@@ -213,6 +221,55 @@ class LineNotifier:
             except Exception as exc:
                 LOGGER.warning("LINE subscriber fallback list could not be loaded: %s", exc)
         return merge_unique_ids([*self.target_ids, *subscriber_ids])
+
+
+class QueuedLineNotifier:
+    def __init__(
+        self,
+        notifier: LineNotifier,
+        queue_store: "LineNotificationQueueStore | None" = None,
+        interval_seconds: int = DEFAULT_LINE_NOTIFY_INTERVAL_SECONDS,
+    ) -> None:
+        self.notifier = notifier
+        self.queue_store = queue_store
+        self.interval_seconds = max(interval_seconds, 0)
+
+    @classmethod
+    def from_env(cls) -> "QueuedLineNotifier":
+        return cls(
+            notifier=LineNotifier.from_env(),
+            queue_store=LineNotificationQueueStore.from_env(),
+            interval_seconds=parse_int(os.getenv("LINE_NOTIFY_INTERVAL_SECONDS"), DEFAULT_LINE_NOTIFY_INTERVAL_SECONDS),
+        )
+
+    def notify_new_messages(self, messages: list[LineMessageLike]) -> bool:
+        if self.queue_store is None:
+            return self.notifier.notify_new_messages(messages)
+        queued_count = self.queue_store.enqueue(messages)
+        LOGGER.info("Queued %s LINE notification message(s)", queued_count)
+        return self.flush_due()
+
+    def flush_due(self, force: bool = False) -> bool:
+        if self.queue_store is None:
+            return False
+        pending = self.queue_store.pending_messages()
+        if not pending:
+            return False
+        if not force and not self.queue_store.is_due(self.interval_seconds):
+            LOGGER.info("LINE notification queue has %s pending message(s), waiting for interval", len(pending))
+            return False
+
+        attempted_at = now_utc_iso()
+        self.queue_store.set_state("last_attempt_at", attempted_at)
+        sent = self.notifier.notify_new_messages(pending)
+        if not sent:
+            LOGGER.warning("LINE queued notification send failed; pending messages will be retried later")
+            return False
+
+        self.queue_store.mark_notified([message.data_key for message in pending], attempted_at)
+        self.queue_store.set_state("last_sent_at", attempted_at)
+        LOGGER.info("LINE queued notification sent for %s message(s)", len(pending))
+        return True
 
 
 class SubscriberStore:
@@ -267,6 +324,158 @@ class SubscriberStore:
             if status in {"", "active"}:
                 user_ids.append(user_id)
         return merge_unique_ids(user_ids)
+
+
+class LineNotificationQueueStore:
+    queue_headers = ["data_key", "date", "time", "company_id", "company_name", "subject", "queued_at", "notified_at", "status"]
+    state_headers = ["key", "value"]
+
+    def __init__(
+        self,
+        sheet_id: str,
+        credentials_path: str | None = None,
+        queue_worksheet_title: str = NOTIFICATION_QUEUE_WORKSHEET_TITLE,
+        state_worksheet_title: str = NOTIFICATION_STATE_WORKSHEET_TITLE,
+    ) -> None:
+        self.sheet_id = sheet_id.strip()
+        self.credentials_path = credentials_path
+        self.queue_worksheet_title = queue_worksheet_title
+        self.state_worksheet_title = state_worksheet_title
+
+    @classmethod
+    def from_env(cls) -> "LineNotificationQueueStore | None":
+        if not parse_bool(os.getenv("LINE_NOTIFY_QUEUE_ENABLED", "true")):
+            return None
+        sheet_id = os.getenv("LINE_NOTIFY_QUEUE_SHEET_ID", "").strip() or os.getenv("LINE_SUBSCRIBERS_SHEET_ID", "").strip()
+        if not sheet_id:
+            return None
+        return cls(sheet_id, os.getenv("GOOGLE_APPLICATION_CREDENTIALS") or default_credentials_path())
+
+    def enqueue(self, messages: list[LineMessageLike]) -> int:
+        if not messages:
+            return 0
+        worksheet = self._worksheet(self.queue_worksheet_title, self.queue_headers)
+        rows = worksheet.get_all_values()
+        existing_keys = {row[0].strip() for row in rows[1:] if row and row[0].strip()}
+        queued_at = now_utc_iso()
+        new_rows = []
+        for message in messages:
+            data_key = getattr(message, "data_key", "")
+            if not data_key or data_key in existing_keys:
+                continue
+            new_rows.append(
+                [
+                    data_key,
+                    message.date,
+                    message.time,
+                    message.company_id,
+                    message.company_name,
+                    message.subject,
+                    queued_at,
+                    "",
+                    "pending",
+                ]
+            )
+            existing_keys.add(data_key)
+        if new_rows:
+            worksheet.append_rows(new_rows, value_input_option="USER_ENTERED")
+        return len(new_rows)
+
+    def pending_messages(self) -> list[LineMessageLike]:
+        worksheet = self._worksheet(self.queue_worksheet_title, self.queue_headers)
+        rows = worksheet.get_all_values()
+        if len(rows) <= 1:
+            return []
+        headers = [normalize_header(value) for value in rows[0]]
+        indexes = {header: index for index, header in enumerate(headers)}
+        messages = []
+        for row in rows[1:]:
+            status = row_value(row, indexes.get("status")).lower()
+            if status and status != "pending":
+                continue
+            data_key = row_value(row, indexes.get("data_key"))
+            if not data_key:
+                continue
+            messages.append(
+                QueuedLineMessage(
+                    data_key=data_key,
+                    date=row_value(row, indexes.get("date")),
+                    time=row_value(row, indexes.get("time")),
+                    company_id=row_value(row, indexes.get("company_id")),
+                    company_name=row_value(row, indexes.get("company_name")),
+                    subject=row_value(row, indexes.get("subject")),
+                )
+            )
+        return messages
+
+    def mark_notified(self, data_keys: Iterable[str], notified_at: str) -> None:
+        key_set = set(data_keys)
+        if not key_set:
+            return
+        worksheet = self._worksheet(self.queue_worksheet_title, self.queue_headers)
+        rows = worksheet.get_all_values()
+        if len(rows) <= 1:
+            return
+        headers = [normalize_header(value) for value in rows[0]]
+        data_key_index = headers.index("data_key")
+        notified_at_index = headers.index("notified_at")
+        status_index = headers.index("status")
+        for row_index, row in enumerate(rows[1:], start=2):
+            if row_value(row, data_key_index) not in key_set:
+                continue
+            worksheet.update_cell(row_index, notified_at_index + 1, notified_at)
+            worksheet.update_cell(row_index, status_index + 1, "sent")
+
+    def is_due(self, interval_seconds: int) -> bool:
+        if interval_seconds <= 0:
+            return True
+        last_attempt_at = self.get_state("last_attempt_at")
+        if not last_attempt_at:
+            return True
+        last_attempt = parse_iso_datetime(last_attempt_at)
+        if last_attempt is None:
+            return True
+        return (datetime.now(timezone.utc) - last_attempt).total_seconds() >= interval_seconds
+
+    def get_state(self, key: str) -> str:
+        worksheet = self._worksheet(self.state_worksheet_title, self.state_headers)
+        rows = worksheet.get_all_values()
+        for row in rows[1:]:
+            if row_value(row, 0) == key:
+                return row_value(row, 1)
+        return ""
+
+    def set_state(self, key: str, value: str) -> None:
+        worksheet = self._worksheet(self.state_worksheet_title, self.state_headers)
+        rows = worksheet.get_all_values()
+        for row_index, row in enumerate(rows[1:], start=2):
+            if row_value(row, 0) == key:
+                worksheet.update_cell(row_index, 2, value)
+                return
+        worksheet.append_row([key, value], value_input_option="USER_ENTERED")
+
+    def _worksheet(self, title: str, headers: list[str]):
+        if gspread is None:
+            raise RuntimeError("gspread is not installed. Run: pip install -r requirements.txt")
+        if not self.credentials_path:
+            raise RuntimeError("GOOGLE_APPLICATION_CREDENTIALS is missing")
+        spreadsheet = gspread.service_account(filename=self.credentials_path).open_by_key(self.sheet_id)
+        try:
+            worksheet = spreadsheet.worksheet(title)
+        except WorksheetNotFound:
+            worksheet = spreadsheet.add_worksheet(title=title, rows=1000, cols=max(len(headers), 10))
+        ensure_headers(worksheet, headers)
+        return worksheet
+
+
+class QueuedLineMessage:
+    def __init__(self, data_key: str, date: str, time: str, company_id: str, company_name: str, subject: str) -> None:
+        self.data_key = data_key
+        self.date = date
+        self.time = time
+        self.company_id = company_id
+        self.company_name = company_name
+        self.subject = subject
 
 
 def format_line_message(message: LineMessageLike, site_url: str = DEFAULT_SITE_URL) -> str:
@@ -328,6 +537,38 @@ def merge_unique_ids(values: Iterable[str]) -> list[str]:
         seen.add(normalized)
         result.append(normalized)
     return result
+
+
+def row_value(row: list[str], index: int | None) -> str:
+    if index is None or index >= len(row):
+        return ""
+    return str(row[index] or "").strip()
+
+
+def ensure_headers(worksheet, headers: list[str]) -> None:
+    first_row = worksheet.row_values(1)
+    normalized = [normalize_header(value) for value in first_row]
+    if normalized[: len(headers)] == headers:
+        return
+    worksheet.update("A1", [headers])
+    try:
+        worksheet.freeze(rows=1)
+    except Exception:
+        LOGGER.debug("Could not freeze header row for worksheet")
+
+
+def now_utc_iso() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def parse_iso_datetime(value: str) -> datetime | None:
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
 
 
 def http_status_code(exc: Exception) -> int | None:
