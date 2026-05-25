@@ -1,6 +1,9 @@
 export default {
   async fetch(request, env, ctx) {
     if (request.method === "GET") {
+      if (new URL(request.url).searchParams.get("debug") === "1") {
+        return debugAppsScript(env);
+      }
       return jsonResponse({ ok: true, message: "LINE webhook worker is ready." });
     }
     if (request.method !== "POST") {
@@ -15,6 +18,10 @@ export default {
     const isValid = await verifyLineSignature(body, env.LINE_CHANNEL_SECRET, signature);
     if (!isValid) {
       return jsonResponse({ ok: false, error: "invalid_signature" }, 401);
+    }
+
+    if (new URL(request.url).searchParams.get("debug") === "1") {
+      return forwardToAppsScript(env.APPS_SCRIPT_WEBHOOK_URL, body);
     }
 
     ctx.waitUntil(forwardToAppsScript(env.APPS_SCRIPT_WEBHOOK_URL, body));
@@ -47,9 +54,27 @@ async function forwardToAppsScript(url, body) {
     body,
     redirect: "follow",
   });
+  const responseBody = await response.text();
   if (!response.ok) {
-    throw new Error(`Apps Script webhook failed: ${response.status}`);
+    throw new Error(`Apps Script webhook failed: ${response.status} ${responseBody.slice(0, 500)}`);
   }
+  return jsonResponse({ ok: true, appsScriptStatus: response.status, appsScriptBody: safeJson(responseBody) });
+}
+
+async function debugAppsScript(env) {
+  if (!env.APPS_SCRIPT_WEBHOOK_URL) {
+    return jsonResponse({ ok: false, error: "missing_apps_script_url" }, 500);
+  }
+  const response = await fetch(`${env.APPS_SCRIPT_WEBHOOK_URL}&health=1`, {
+    method: "GET",
+    redirect: "follow",
+  });
+  const responseBody = await response.text();
+  return jsonResponse({
+    ok: response.ok,
+    status: response.status,
+    appsScriptBody: safeJson(responseBody),
+  }, response.ok ? 200 : 502);
 }
 
 function jsonResponse(body, status = 200) {
@@ -68,6 +93,14 @@ function arrayBufferToBase64(buffer) {
     binary += String.fromCharCode(byte);
   }
   return btoa(binary);
+}
+
+function safeJson(text) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text.slice(0, 500);
+  }
 }
 
 function timingSafeEqual(left, right) {
