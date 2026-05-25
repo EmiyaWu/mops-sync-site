@@ -12,6 +12,9 @@ LOGGER = logging.getLogger("mops_sync")
 LINE_PUSH_URL = "https://api.line.me/v2/bot/message/push"
 LINE_BROADCAST_URL = "https://api.line.me/v2/bot/message/broadcast"
 DEFAULT_LINE_NOTIFY_MAX_INDIVIDUAL = 10
+DEFAULT_LINE_BROADCAST_MAX_CHARS = 4500
+DEFAULT_LINE_BROADCAST_COMPANY_MAX_CHARS = 80
+DEFAULT_LINE_BROADCAST_SUBJECT_MAX_CHARS = 240
 DEFAULT_SITE_URL = "https://mops-sync-site.pages.dev/"
 
 
@@ -32,6 +35,7 @@ class LineNotifier:
         max_individual: int = DEFAULT_LINE_NOTIFY_MAX_INDIVIDUAL,
         site_url: str = DEFAULT_SITE_URL,
         notify_mode: str = "push",
+        broadcast_max_chars: int = DEFAULT_LINE_BROADCAST_MAX_CHARS,
         push_url: str = LINE_PUSH_URL,
         broadcast_url: str = LINE_BROADCAST_URL,
         timeout_seconds: int = 15,
@@ -42,6 +46,7 @@ class LineNotifier:
         self.max_individual = max(max_individual, 0)
         self.site_url = site_url.strip()
         self.notify_mode = normalize_notify_mode(notify_mode)
+        self.broadcast_max_chars = max(broadcast_max_chars, 500)
         self.push_url = push_url
         self.broadcast_url = broadcast_url
         self.timeout_seconds = timeout_seconds
@@ -55,6 +60,7 @@ class LineNotifier:
             max_individual=parse_int(os.getenv("LINE_NOTIFY_MAX_INDIVIDUAL"), DEFAULT_LINE_NOTIFY_MAX_INDIVIDUAL),
             site_url=os.getenv("MOPS_SITE_URL", DEFAULT_SITE_URL),
             notify_mode=os.getenv("LINE_NOTIFY_MODE", "push"),
+            broadcast_max_chars=parse_int(os.getenv("LINE_BROADCAST_MAX_CHARS"), DEFAULT_LINE_BROADCAST_MAX_CHARS),
         )
 
     def notify_new_messages(self, messages: list[LineMessageLike]) -> None:
@@ -108,15 +114,15 @@ class LineNotifier:
             lines.extend(
                 [
                     "",
-                    f"{index}. \u516c\u53f8\u540d:{message.company_name}",
-                    f"\u4e3b\u65e8:{message.subject}",
+                    f"{index}. \u516c\u53f8\u540d:{truncate_text(message.company_name, DEFAULT_LINE_BROADCAST_COMPANY_MAX_CHARS)}",
+                    f"\u4e3b\u65e8:{truncate_text(message.subject, DEFAULT_LINE_BROADCAST_SUBJECT_MAX_CHARS)}",
                 ]
             )
         if len(sorted_messages) > len(visible_messages):
             lines.extend(["", f"\u5176\u9918 {len(sorted_messages) - len(visible_messages)} \u7b46\u8acb\u67e5\u770b\u7db2\u7ad9\u3002"])
         if self.site_url:
             lines.extend(["", f"\u67e5\u770b\u7db2\u7ad9:{self.site_url}"])
-        return "\n".join(lines)
+        return truncate_broadcast_text("\n".join(lines), self.site_url, self.broadcast_max_chars)
 
     def _push_text(self, target_id: str, text: str) -> None:
         response = requests.post(
@@ -181,6 +187,21 @@ def parse_int(value: str | None, default: int) -> int:
     except ValueError:
         LOGGER.warning("Invalid integer value %r, using default %s", value, default)
         return default
+
+
+def truncate_text(value: str, max_chars: int) -> str:
+    text = str(value or "").strip()
+    if max_chars <= 1 or len(text) <= max_chars:
+        return text
+    return f"{text[: max_chars - 1]}\u2026"
+
+
+def truncate_broadcast_text(text: str, site_url: str, max_chars: int) -> str:
+    if len(text) <= max_chars:
+        return text
+    suffix = f"\n\n\u8a0a\u606f\u904e\u9577\uff0c\u8acb\u67e5\u770b\u7db2\u7ad9:{site_url}" if site_url else "\n\n\u8a0a\u606f\u904e\u9577\uff0c\u8acb\u67e5\u770b\u7db2\u7ad9\u3002"
+    allowed = max(max_chars - len(suffix) - 1, 0)
+    return f"{text[:allowed]}\u2026{suffix}"
 
 
 def normalize_notify_mode(value: str | None) -> str:
