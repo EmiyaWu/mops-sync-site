@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import time
 from typing import Iterable, Protocol
 
 from curl_cffi import requests
@@ -15,6 +16,8 @@ DEFAULT_LINE_NOTIFY_MAX_INDIVIDUAL = 10
 DEFAULT_LINE_BROADCAST_MAX_CHARS = 4500
 DEFAULT_LINE_BROADCAST_COMPANY_MAX_CHARS = 80
 DEFAULT_LINE_BROADCAST_SUBJECT_MAX_CHARS = 240
+DEFAULT_LINE_BROADCAST_MAX_ATTEMPTS = 2
+DEFAULT_LINE_BROADCAST_RETRY_SECONDS = 30
 DEFAULT_SITE_URL = "https://mops-sync-site.pages.dev/"
 
 
@@ -36,6 +39,8 @@ class LineNotifier:
         site_url: str = DEFAULT_SITE_URL,
         notify_mode: str = "push",
         broadcast_max_chars: int = DEFAULT_LINE_BROADCAST_MAX_CHARS,
+        broadcast_max_attempts: int = DEFAULT_LINE_BROADCAST_MAX_ATTEMPTS,
+        broadcast_retry_seconds: int = DEFAULT_LINE_BROADCAST_RETRY_SECONDS,
         push_url: str = LINE_PUSH_URL,
         broadcast_url: str = LINE_BROADCAST_URL,
         timeout_seconds: int = 15,
@@ -47,6 +52,8 @@ class LineNotifier:
         self.site_url = site_url.strip()
         self.notify_mode = normalize_notify_mode(notify_mode)
         self.broadcast_max_chars = max(broadcast_max_chars, 500)
+        self.broadcast_max_attempts = max(broadcast_max_attempts, 1)
+        self.broadcast_retry_seconds = max(broadcast_retry_seconds, 0)
         self.push_url = push_url
         self.broadcast_url = broadcast_url
         self.timeout_seconds = timeout_seconds
@@ -61,6 +68,8 @@ class LineNotifier:
             site_url=os.getenv("MOPS_SITE_URL", DEFAULT_SITE_URL),
             notify_mode=os.getenv("LINE_NOTIFY_MODE", "push"),
             broadcast_max_chars=parse_int(os.getenv("LINE_BROADCAST_MAX_CHARS"), DEFAULT_LINE_BROADCAST_MAX_CHARS),
+            broadcast_max_attempts=parse_int(os.getenv("LINE_BROADCAST_MAX_ATTEMPTS"), DEFAULT_LINE_BROADCAST_MAX_ATTEMPTS),
+            broadcast_retry_seconds=parse_int(os.getenv("LINE_BROADCAST_RETRY_SECONDS"), DEFAULT_LINE_BROADCAST_RETRY_SECONDS),
         )
 
     def notify_new_messages(self, messages: list[LineMessageLike]) -> None:
@@ -73,10 +82,9 @@ class LineNotifier:
             LOGGER.warning("LINE notification skipped: LINE_CHANNEL_ACCESS_TOKEN is missing")
             return
         if self.notify_mode == "broadcast":
-            try:
-                self._broadcast_text(self.build_broadcast_text(messages))
-            except Exception as exc:
-                LOGGER.warning("LINE broadcast notification failed: %s", exc)
+            text = self.build_broadcast_text(messages)
+            if not self._try_broadcast_text(text):
+                self._fallback_push_text(text)
             return
 
         if not self.target_ids:
@@ -148,6 +156,40 @@ class LineNotifier:
         )
         response.raise_for_status()
 
+    def _try_broadcast_text(self, text: str) -> bool:
+        for attempt in range(1, self.broadcast_max_attempts + 1):
+            try:
+                self._broadcast_text(text)
+                return True
+            except Exception as exc:
+                status_code = http_status_code(exc)
+                can_retry = status_code == 429 and attempt < self.broadcast_max_attempts
+                if can_retry:
+                    sleep_seconds = retry_after_seconds(exc, self.broadcast_retry_seconds)
+                    LOGGER.warning(
+                        "LINE broadcast rate limited, retry %s/%s after %s seconds",
+                        attempt,
+                        self.broadcast_max_attempts,
+                        sleep_seconds,
+                    )
+                    if sleep_seconds > 0:
+                        time.sleep(sleep_seconds)
+                    continue
+                LOGGER.warning("LINE broadcast notification failed: %s", exc)
+                return False
+        return False
+
+    def _fallback_push_text(self, text: str) -> None:
+        if not self.target_ids:
+            LOGGER.warning("LINE broadcast failed and LINE_TARGET_IDS is missing; no fallback recipients")
+            return
+        LOGGER.warning("LINE broadcast failed; fallback pushing summary to %s configured target(s)", len(self.target_ids))
+        for target_id in self.target_ids:
+            try:
+                self._push_text(target_id, text)
+            except Exception as exc:
+                LOGGER.warning("LINE fallback push failed for target %s: %s", mask_identifier(target_id), exc)
+
 
 def format_line_message(message: LineMessageLike, site_url: str = DEFAULT_SITE_URL) -> str:
     text = (
@@ -187,6 +229,23 @@ def parse_int(value: str | None, default: int) -> int:
     except ValueError:
         LOGGER.warning("Invalid integer value %r, using default %s", value, default)
         return default
+
+
+def http_status_code(exc: Exception) -> int | None:
+    response = getattr(exc, "response", None)
+    status_code = getattr(response, "status_code", None)
+    if status_code is not None:
+        return int(status_code)
+    match = re.search(r"\bHTTP Error (\d{3})\b", str(exc))
+    return int(match.group(1)) if match else None
+
+
+def retry_after_seconds(exc: Exception, default: int) -> int:
+    response = getattr(exc, "response", None)
+    headers = getattr(response, "headers", {}) or {}
+    value = headers.get("Retry-After") or headers.get("retry-after")
+    seconds = parse_int(value, default) if value is not None else default
+    return min(max(seconds, 0), 120)
 
 
 def truncate_text(value: str, max_chars: int) -> str:
