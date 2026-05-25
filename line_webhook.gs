@@ -43,8 +43,11 @@ function doPost(e) {
   return jsonResponse_({ ok: true, handled: events.length }, 200);
 }
 
-function doGet() {
-  return ContentService.createTextOutput("LINE webhook is ready.");
+function doGet(e) {
+  if (e && e.parameter && e.parameter.health === "1") {
+    return healthCheck_();
+  }
+  return jsonResponse_({ ok: true, message: "LINE webhook is ready." }, 200);
 }
 
 function isAuthorized_(e) {
@@ -134,4 +137,32 @@ function jsonResponse_(body, statusCode) {
   const output = ContentService.createTextOutput(JSON.stringify(body));
   output.setMimeType(ContentService.MimeType.JSON);
   return output;
+}
+
+function healthCheck_() {
+  const properties = PropertiesService.getScriptProperties();
+  const accessToken = properties.getProperty("LINE_CHANNEL_ACCESS_TOKEN");
+  const sheetId = properties.getProperty("LINE_SUBSCRIBERS_SHEET_ID");
+  const webhookSecret = properties.getProperty("LINE_WEBHOOK_SECRET");
+  const result = {
+    ok: true,
+    hasLineChannelAccessToken: Boolean(accessToken),
+    hasLineSubscribersSheetId: Boolean(sheetId),
+    hasLineWebhookSecret: Boolean(webhookSecret),
+    canOpenSubscriberSheet: false,
+    subscriberSheetIdSuffix: sheetId ? sheetId.slice(-6) : "",
+  };
+  if (sheetId) {
+    try {
+      SpreadsheetApp.openById(sheetId);
+      result.canOpenSubscriberSheet = true;
+    } catch (error) {
+      result.ok = false;
+      result.sheetError = String(error);
+    }
+  }
+  if (!accessToken || !sheetId || !webhookSecret) {
+    result.ok = false;
+  }
+  return jsonResponse_(result, result.ok ? 200 : 500);
 }
