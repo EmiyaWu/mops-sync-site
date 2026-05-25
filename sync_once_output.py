@@ -143,7 +143,11 @@ def sync_once_optimized(config: Config) -> int:
     for candidate, params in candidates:
         if candidate.data_key not in new_keys:
             continue
-        detail = client.fetch_detail(params) if params else "No detail"
+        try:
+            detail = client.fetch_detail(params) if params else "No detail"
+        except AttributeError as exc:
+            LOGGER.warning("MOPS detail response was malformed, continuing without detail for %s: %s", candidate.data_key, exc)
+            detail = "No detail returned"
         detail_fetched += 1 if params else 0
         if params and client.detail_delay_seconds > 0:
             time.sleep(client.detail_delay_seconds)
