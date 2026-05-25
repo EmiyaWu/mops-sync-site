@@ -17,6 +17,7 @@ F_COMPANY_NAME = "\u516c\u53f8\u7c21\u7a31"
 F_SUBJECT = "\u4e3b\u65e8"
 F_DETAIL = "\u8a73\u7d30\u5167\u5bb9"
 PUBLIC_FIELDS = [F_DATE, F_TIME, F_COMPANY_ID, F_COMPANY_NAME, F_SUBJECT, F_DETAIL]
+EXCLUDED_SUBJECT_KEYWORDS = ("\u80a1\u6771\u5e38\u6703", "\u59d4\u54e1\u6703")
 
 
 def main() -> int:
@@ -127,8 +128,15 @@ def rows_to_public_messages(rows: list[list[str]]) -> list[dict[str, str]]:
         for field in PUBLIC_FIELDS:
             index = header_index.get(field)
             item[field] = row[index].strip() if index is not None and index < len(row) else ""
+        if is_excluded_subject(item.get(F_SUBJECT, "")):
+            continue
         messages.append(item)
     return sorted(messages, key=message_sort_key, reverse=True)
+
+
+def is_excluded_subject(subject: str) -> bool:
+    normalized = str(subject or "").strip()
+    return any(keyword in normalized for keyword in EXCLUDED_SUBJECT_KEYWORDS)
 
 
 def message_sort_key(item: dict[str, str]) -> tuple[str, str, str, str]:
@@ -542,8 +550,6 @@ function render() {
     .filter((item) => normalize(item[FIELD_COMPANY_NAME]).includes(nameTerm))
     .filter((item) => `${normalize(item[FIELD_SUBJECT])} ${normalize(item[FIELD_DETAIL])}`.includes(subjectTerm))
     .sort((a, b) => {
-      const left = `${a[FIELD_DATE]} ${a[FIELD_TIME]}`;
-      const right = `${b[FIELD_DATE]} ${b[FIELD_TIME]}`;
       const leftKey = `${sortDate(a[FIELD_DATE])} ${sortTime(a[FIELD_TIME])}`;
       const rightKey = `${sortDate(b[FIELD_DATE])} ${sortTime(b[FIELD_TIME])}`;
       return newestFirst ? rightKey.localeCompare(leftKey) : leftKey.localeCompare(rightKey);
