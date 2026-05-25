@@ -22,6 +22,7 @@ In the GitHub repository, open `Settings -> Secrets and variables -> Actions`, t
 - `LINE_CHANNEL_ACCESS_TOKEN`: LINE Messaging API channel access token
 - `LINE_NOTIFY_ENABLED`: set to `true` to send LINE notifications
 - `LINE_NOTIFY_MAX_INDIVIDUAL`: maximum individual messages to send per sync, for example `10`
+- `LINE_NOTIFY_INTERVAL_SECONDS`: optional minimum seconds between LINE notification sends, default `900`
 - `LINE_TARGET_IDS`: optional admin fallback user IDs, separated by commas
 - `LINE_SUBSCRIBERS_SHEET_ID`: private Google Sheet ID used for LINE subscriber fallback
 
@@ -31,7 +32,9 @@ Do not commit `service-account.json` to GitHub.
 
 GitHub Actions uses `LINE_NOTIFY_MODE=broadcast`, so every user who added the LINE Official Account as a friend can receive new MOPS notifications.
 
-If LINE broadcast is rate-limited, the job falls back to push notifications. Fallback recipients are loaded from:
+New MOPS rows are first stored in `line_notify_queue` in the private subscriber Sheet. GitHub Actions still checks MOPS every 5 minutes, but LINE sends at most once every 15 minutes by default.
+
+If LINE broadcast is rate-limited, pending notifications stay in the queue and are retried after the interval instead of being sent again immediately. Fallback recipients are loaded from:
 
 1. `LINE_TARGET_IDS`
 2. Active `user_id` rows in the private subscriber sheet configured by `LINE_SUBSCRIBERS_SHEET_ID`
@@ -65,10 +68,10 @@ Deploy the Apps Script as a web app:
 - Execute as: Me
 - Who has access: Anyone
 
-Keep the Apps Script web app URL for the Worker variable below. It must include the secret query string, for example:
+Then set the LINE Developers webhook URL to:
 
 ```text
-https://script.google.com/macros/s/DEPLOYMENT_ID/exec?secret=LINE_WEBHOOK_SECRET_VALUE
+https://YOUR_WORKER_NAME.YOUR_SUBDOMAIN.workers.dev/
 ```
 
 ### Cloudflare Worker
@@ -80,11 +83,13 @@ Worker variables and secrets:
 - `LINE_CHANNEL_SECRET`: LINE Messaging API channel secret
 - `APPS_SCRIPT_WEBHOOK_URL`: full Apps Script web app URL, including the secret query string
 
-After deploying the Worker, set LINE Developers `Webhook URL` to the Worker URL and click `Verify`:
+Example `APPS_SCRIPT_WEBHOOK_URL`:
 
 ```text
-https://YOUR_WORKER_NAME.YOUR_SUBDOMAIN.workers.dev/
+https://script.google.com/macros/s/DEPLOYMENT_ID/exec?secret=LINE_WEBHOOK_SECRET_VALUE
 ```
+
+After deploying the Worker, set LINE Developers `Webhook URL` to the Worker URL and click `Verify`.
 
 ## Google Cloud Scheduler
 
