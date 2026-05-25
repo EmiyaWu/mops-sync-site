@@ -30,7 +30,15 @@ DEFAULT_SHEET_ID = "12nk-HoWKMWs4-M4VEmIbEuZVqygYS7AjX8hUqF7hkHs"
 DEFAULT_POLL_INTERVAL_SECONDS = 180
 DEFAULT_TIMEZONE = "Asia/Taipei"
 DEFAULT_MAX_VISIBLE_DAYS = 7
+DEFAULT_LINE_NOTIFY_MAX_INDIVIDUAL = 10
+DEFAULT_LINE_BROADCAST_MAX_CHARS = 4500
+DEFAULT_LINE_BROADCAST_COMPANY_MAX_CHARS = 80
+DEFAULT_LINE_BROADCAST_SUBJECT_MAX_CHARS = 240
 STATE_PATH = Path("state") / "seen_messages.json"
+LINE_PUSH_URL = "https://api.line.me/v2/bot/message/push"
+LINE_BROADCAST_URL = "https://api.line.me/v2/bot/message/broadcast"
+DEFAULT_SITE_URL = "https://mops-sync-site.pages.dev/"
+EXCLUDED_SUBJECT_KEYWORDS = ("股東常會", "委員會")
 
 F_DATE = "\u65e5\u671f"
 F_TIME = "\u6642\u9593"
@@ -42,7 +50,7 @@ F_KEY = "\u8cc7\u6599\u9375"
 F_FETCHED_AT = "\u6293\u53d6\u6642\u9593"
 
 SHEET_HEADERS = [F_DATE, F_TIME, F_COMPANY_ID, F_COMPANY_NAME, F_SUBJECT, F_DETAIL, F_KEY, F_FETCHED_AT]
-PUBLIC_FIELDS = [F_DATE, F_TIME, F_COMPANY_ID, F_COMPANY_NAME, F_SUBJECT]
+PUBLIC_FIELDS = [F_DATE, F_TIME, F_COMPANY_ID, F_COMPANY_NAME, F_SUBJECT, F_DETAIL]
 
 LOGGER = logging.getLogger("mops_sync")
 
@@ -95,6 +103,7 @@ class MOPSMessage:
             F_COMPANY_ID: self.company_id,
             F_COMPANY_NAME: self.company_name,
             F_SUBJECT: self.subject,
+            F_DETAIL: self.detail,
         }
 
 
@@ -123,6 +132,10 @@ class MOPSClient:
         for item in self.fetch_list():
             if not isinstance(item, dict):
                 LOGGER.warning("Skip unexpected list item: %r", item)
+                continue
+            subject = clean_text(item.get("subject"))
+            if is_excluded_subject(subject):
+                LOGGER.info("Skip excluded MOPS subject: %s", subject)
                 continue
             params = self._extract_detail_params(item)
             detail = self.fetch_detail(params) if params else "No detail"
@@ -258,7 +271,8 @@ class GoogleSheetWriter:
             return 0
         worksheet = self._get_or_create_daily_worksheet(worksheet_date)
         self._ensure_headers(worksheet)
-        self._with_retry(lambda: worksheet.append_rows([message.to_sheet_row() for message in messages], value_input_option="USER_ENTERED"))
+        rows = [message.to_sheet_row() for message in sort_messages_newest_first(messages)]
+        self._with_retry(lambda: worksheet.insert_rows(rows, row=2, value_input_option="USER_ENTERED"))
         self.organize_daily_worksheets()
         return len(messages)
 
@@ -341,6 +355,129 @@ class GoogleSheetWriter:
         raise RuntimeError("Google Sheet API failed after retries") from last_error
 
 
+class LineNotifier:
+    def __init__(
+        self,
+        channel_access_token: str = "",
+        target_ids: Iterable[str] = (),
+        enabled: bool = False,
+        max_individual: int = DEFAULT_LINE_NOTIFY_MAX_INDIVIDUAL,
+        site_url: str = DEFAULT_SITE_URL,
+        notify_mode: str = "push",
+        broadcast_max_chars: int = DEFAULT_LINE_BROADCAST_MAX_CHARS,
+        push_url: str = LINE_PUSH_URL,
+        broadcast_url: str = LINE_BROADCAST_URL,
+        timeout_seconds: int = 15,
+    ) -> None:
+        self.channel_access_token = channel_access_token.strip()
+        self.target_ids = [target_id.strip() for target_id in target_ids if target_id and target_id.strip()]
+        self.enabled = enabled
+        self.max_individual = max(max_individual, 0)
+        self.site_url = site_url.strip()
+        self.notify_mode = normalize_notify_mode(notify_mode)
+        self.broadcast_max_chars = max(broadcast_max_chars, 500)
+        self.push_url = push_url
+        self.broadcast_url = broadcast_url
+        self.timeout_seconds = timeout_seconds
+
+    @classmethod
+    def from_env(cls) -> "LineNotifier":
+        return cls(
+            channel_access_token=os.getenv("LINE_CHANNEL_ACCESS_TOKEN", ""),
+            target_ids=os.getenv("LINE_TARGET_IDS", "").split(","),
+            enabled=parse_bool(os.getenv("LINE_NOTIFY_ENABLED", "false")),
+            max_individual=parse_int(os.getenv("LINE_NOTIFY_MAX_INDIVIDUAL"), DEFAULT_LINE_NOTIFY_MAX_INDIVIDUAL),
+            site_url=os.getenv("MOPS_SITE_URL", DEFAULT_SITE_URL),
+            notify_mode=os.getenv("LINE_NOTIFY_MODE", "push"),
+            broadcast_max_chars=parse_int(os.getenv("LINE_BROADCAST_MAX_CHARS"), DEFAULT_LINE_BROADCAST_MAX_CHARS),
+        )
+
+    def notify_new_messages(self, messages: list[MOPSMessage]) -> None:
+        if not messages:
+            return
+        if not self.enabled:
+            LOGGER.info("LINE notification disabled")
+            return
+        if not self.channel_access_token:
+            LOGGER.warning("LINE notification skipped: LINE_CHANNEL_ACCESS_TOKEN is missing")
+            return
+        if self.notify_mode == "broadcast":
+            try:
+                self._broadcast_text(self.build_broadcast_text(messages))
+            except Exception as exc:
+                LOGGER.warning("LINE broadcast notification failed: %s", exc)
+            return
+
+        if not self.target_ids:
+            LOGGER.warning("LINE notification skipped: LINE_TARGET_IDS is missing")
+            return
+
+        texts = self.build_notification_texts(messages)
+        for target_id in self.target_ids:
+            for text in texts:
+                try:
+                    self._push_text(target_id, text)
+                except Exception as exc:
+                    LOGGER.warning("LINE notification failed for target %s: %s", mask_identifier(target_id), exc)
+
+    def build_notification_texts(self, messages: list[MOPSMessage]) -> list[str]:
+        sorted_messages = sort_messages_newest_first(messages)
+        texts: list[str] = []
+        if len(sorted_messages) > self.max_individual:
+            texts.append(
+                "\u76ee\u524d\u6709 {count} \u7b46\u65b0\u7684\u91cd\u5927\u5373\u6642\u8a0a\u606f!\n"
+                "\u5c07\u5148\u5217\u51fa\u524d {limit} \u7b46\uff0c\u5176\u9918\u8acb\u67e5\u770b\u7db2\u7ad9\u3002".format(
+                    count=len(sorted_messages),
+                    limit=self.max_individual,
+                )
+            )
+        for message in sorted_messages[: self.max_individual]:
+            texts.append(format_line_message(message, self.site_url))
+        return texts
+
+    def build_broadcast_text(self, messages: list[MOPSMessage]) -> str:
+        sorted_messages = sort_messages_newest_first(messages)
+        visible_messages = sorted_messages[: self.max_individual]
+        lines = [f"\u76ee\u524d\u6709 {len(sorted_messages)} \u7b46\u65b0\u7684\u91cd\u5927\u5373\u6642\u8a0a\u606f!"]
+        for index, message in enumerate(visible_messages, start=1):
+            lines.extend(
+                [
+                    "",
+                    f"{index}. \u516c\u53f8\u540d:{truncate_text(message.company_name, DEFAULT_LINE_BROADCAST_COMPANY_MAX_CHARS)}",
+                    f"\u4e3b\u65e8:{truncate_text(message.subject, DEFAULT_LINE_BROADCAST_SUBJECT_MAX_CHARS)}",
+                ]
+            )
+        if len(sorted_messages) > len(visible_messages):
+            lines.extend(["", f"\u5176\u9918 {len(sorted_messages) - len(visible_messages)} \u7b46\u8acb\u67e5\u770b\u7db2\u7ad9\u3002"])
+        if self.site_url:
+            lines.extend(["", f"\u67e5\u770b\u7db2\u7ad9:{self.site_url}"])
+        return truncate_broadcast_text("\n".join(lines), self.site_url, self.broadcast_max_chars)
+
+    def _push_text(self, target_id: str, text: str) -> None:
+        response = requests.post(
+            self.push_url,
+            headers={
+                "Authorization": f"Bearer {self.channel_access_token}",
+                "Content-Type": "application/json",
+            },
+            json={"to": target_id, "messages": [{"type": "text", "text": text}]},
+            timeout=self.timeout_seconds,
+        )
+        response.raise_for_status()
+
+    def _broadcast_text(self, text: str) -> None:
+        response = requests.post(
+            self.broadcast_url,
+            headers={
+                "Authorization": f"Bearer {self.channel_access_token}",
+                "Content-Type": "application/json",
+            },
+            json={"messages": [{"type": "text", "text": text}]},
+            timeout=self.timeout_seconds,
+        )
+        response.raise_for_status()
+
+
 class SiteExporter:
     def __init__(self, output_dir: Path) -> None:
         self.output_dir = output_dir
@@ -366,7 +503,7 @@ class SiteExporter:
 
     @staticmethod
     def _sort_messages(messages: list[MOPSMessage]) -> list[MOPSMessage]:
-        return sorted(messages, key=lambda message: (message.date, message.time, message.company_id, message.subject), reverse=True)
+        return sort_messages_newest_first(messages)
 
     @staticmethod
     def _render_html(payload: dict[str, Any]) -> str:
@@ -375,7 +512,8 @@ class SiteExporter:
             f"<td data-label=\"Time\">{html.escape(item[F_TIME])}</td>"
             f"<td data-label=\"Company ID\">{html.escape(item[F_COMPANY_ID])}</td>"
             f"<td data-label=\"Company\">{html.escape(item[F_COMPANY_NAME])}</td>"
-            f"<td data-label=\"Subject\" class=\"subject\">{html.escape(item[F_SUBJECT])}</td>"
+            f"<td data-label=\"Subject\" class=\"subject\"><strong>{html.escape(item[F_SUBJECT])}</strong>"
+            f"<p>{html.escape(item.get(F_DETAIL, ''))}</p></td>"
             "</tr>"
             for item in payload["messages"]
         )
@@ -388,7 +526,7 @@ class SiteExporter:
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>MOPS Material Information</title>
+  <title>MOPS Material Information Dashboard</title>
   <link rel="stylesheet" href="assets/site.css">
 </head>
 <body>
@@ -397,6 +535,7 @@ class SiteExporter:
       <div>
         <p class="eyebrow">MOPS Live Feed</p>
         <h1>Material Information Dashboard</h1>
+        <p class="subtitle">A clean public dashboard for MOPS material information, including company, subject, and full detail content.</p>
       </div>
       <div class="metrics" aria-label="Update information">
         <div class="metric"><span>Rows Today</span><strong id="totalCount">{count}</strong></div>
@@ -406,12 +545,12 @@ class SiteExporter:
     <section class="toolbar" aria-label="Filters">
       <label>Company ID<input id="companyIdFilter" type="search" inputmode="numeric" placeholder="2330"></label>
       <label>Company<input id="companyNameFilter" type="search" placeholder="TSMC"></label>
-      <label class="wide-filter">Subject<input id="subjectFilter" type="search" placeholder="Search subject"></label>
+      <label class="wide-filter">Subject or detail<input id="subjectFilter" type="search" placeholder="Search subject and detail content"></label>
       <button id="sortTimeButton" type="button">Time: Newest</button>
     </section>
     <section class="table-wrap" aria-label="Messages">
       <table>
-        <thead><tr><th>Time</th><th>Company ID</th><th>Company</th><th>Subject</th></tr></thead>
+        <thead><tr><th>Time</th><th>Company ID</th><th>Company</th><th>Subject and detail</th></tr></thead>
         <tbody id="messageRows">{rows}</tbody>
       </table>
     </section>
@@ -429,11 +568,13 @@ class SyncService:
         client: MOPSClient | None = None,
         writer: GoogleSheetWriter | None = None,
         site_exporter: SiteExporter | None = None,
+        notifier: LineNotifier | None = None,
     ) -> None:
         self.config = config
         self.client = client or MOPSClient()
         self.writer = writer or GoogleSheetWriter(config.sheet_id, config.credentials_path, config.max_visible_days)
         self.site_exporter = site_exporter
+        self.notifier = notifier or LineNotifier.from_env()
         self.deduper = Deduper(config.state_path)
         self.tz = ZoneInfo(config.timezone)
 
@@ -449,6 +590,11 @@ class SyncService:
         else:
             appended_count = self.writer.append_messages(now, new_messages)
             self.deduper.mark_seen(new_messages)
+            if appended_count > 0:
+                try:
+                    self.notifier.notify_new_messages(new_messages)
+                except Exception as exc:
+                    LOGGER.warning("LINE notification failed. Sheet sync remains complete: %s", exc)
             LOGGER.info("Sync complete. fetched=%s appended=%s skipped=%s", len(messages), appended_count, len(messages) - appended_count)
         if export_site_path:
             exporter = self.site_exporter or SiteExporter(export_site_path)
@@ -484,6 +630,78 @@ def parse_worksheet_date(title: str) -> datetime | None:
         return None
 
 
+def sort_messages_newest_first(messages: Iterable[MOPSMessage]) -> list[MOPSMessage]:
+    return sorted(messages, key=message_sort_key, reverse=True)
+
+
+def message_sort_key(message: MOPSMessage) -> tuple[str, str, str, str]:
+    return (normalize_date_for_sort(message.date), normalize_time_for_sort(message.time), message.company_id, message.subject)
+
+
+def normalize_date_for_sort(value: str) -> str:
+    digits = re.sub(r"\D", "", value or "")
+    return digits if len(digits) == 8 else value
+
+
+def normalize_time_for_sort(value: str) -> str:
+    parts = re.findall(r"\d+", value or "")
+    if not parts:
+        return ""
+    hour = int(parts[0]) if len(parts) > 0 else 0
+    minute = int(parts[1]) if len(parts) > 1 else 0
+    second = int(parts[2]) if len(parts) > 2 else 0
+    return f"{hour:02d}:{minute:02d}:{second:02d}"
+
+
+def format_line_message(message: MOPSMessage, site_url: str = DEFAULT_SITE_URL) -> str:
+    text = (
+        "\u76ee\u524d\u6709\u65b0\u7684\u91cd\u5927\u5373\u6642\u8a0a\u606f!\n"
+        f"\u516c\u53f8\u540d:{message.company_name}\n"
+        f"\u4e3b\u65e8:{message.subject}"
+    )
+    return f"{text}\n\u67e5\u770b\u7db2\u7ad9:{site_url.strip()}" if site_url.strip() else text
+
+
+def parse_bool(value: str | None) -> bool:
+    return str(value or "").strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def parse_int(value: str | None, default: int) -> int:
+    try:
+        return int(str(value).strip()) if value is not None and str(value).strip() else default
+    except ValueError:
+        LOGGER.warning("Invalid integer value %r, using default %s", value, default)
+        return default
+
+
+def truncate_text(value: str, max_chars: int) -> str:
+    text = str(value or "").strip()
+    if max_chars <= 1 or len(text) <= max_chars:
+        return text
+    return f"{text[: max_chars - 1]}\u2026"
+
+
+def truncate_broadcast_text(text: str, site_url: str, max_chars: int) -> str:
+    if len(text) <= max_chars:
+        return text
+    suffix = f"\n\n\u8a0a\u606f\u904e\u9577\uff0c\u8acb\u67e5\u770b\u7db2\u7ad9:{site_url}" if site_url else "\n\n\u8a0a\u606f\u904e\u9577\uff0c\u8acb\u67e5\u770b\u7db2\u7ad9\u3002"
+    allowed = max(max_chars - len(suffix) - 1, 0)
+    return f"{text[:allowed]}\u2026{suffix}"
+
+
+def normalize_notify_mode(value: str | None) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized == "broadcast":
+        return "broadcast"
+    return "push"
+
+
+def mask_identifier(value: str) -> str:
+    if len(value) <= 8:
+        return "****"
+    return f"{value[:4]}...{value[-4:]}"
+
+
 def default_credentials_path() -> str | None:
     candidates = [
         Path.cwd() / "service-account.json",
@@ -510,8 +728,21 @@ def clean_text(value: Any) -> str:
     return "" if value is None else str(value).strip()
 
 
+def is_excluded_subject(subject: str) -> bool:
+    normalized = clean_text(subject)
+    return any(keyword in normalized for keyword in EXCLUDED_SUBJECT_KEYWORDS)
+
+
 def configure_logging(verbose: bool = False) -> None:
     logging.basicConfig(level=logging.DEBUG if verbose else logging.INFO, format="%(asctime)s %(levelname)s %(name)s - %(message)s")
+
+
+def write_github_output(name: str, value: Any) -> None:
+    output_path = os.getenv("GITHUB_OUTPUT")
+    if not output_path:
+        return
+    with Path(output_path).open("a", encoding="utf-8") as output_file:
+        output_file.write(f"{name}={value}\n")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -534,7 +765,10 @@ def main() -> int:
         if args.command == "run":
             service.run_forever(args.export_site)
         elif args.command == "once":
-            service.sync_once(args.export_site)
+            new_rows = service.sync_once(args.export_site)
+            write_github_output("new_rows", new_rows)
+            write_github_output("has_new_rows", str(new_rows > 0).lower())
+            LOGGER.info("GitHub Actions output: new_rows=%s has_new_rows=%s", new_rows, str(new_rows > 0).lower())
         elif args.command == "validate":
             service.validate()
             LOGGER.info("Validation complete")
@@ -568,6 +802,7 @@ body {
 .topbar { display: flex; align-items: end; justify-content: space-between; gap: 20px; padding-bottom: 18px; border-bottom: 1px solid var(--line); }
 .eyebrow { margin: 0 0 6px; color: var(--accent-strong); font-size: 13px; font-weight: 700; }
 h1 { margin: 0; font-size: 28px; line-height: 1.25; }
+.subtitle { max-width: 720px; margin: 10px 0 0; color: var(--muted); font-size: 14px; line-height: 1.65; }
 .metrics { display: grid; grid-template-columns: minmax(96px, auto) minmax(220px, auto); gap: 10px; }
 .metric { min-height: 68px; padding: 12px 14px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
 .metric span { display: block; color: var(--muted); font-size: 12px; margin-bottom: 6px; }
@@ -584,6 +819,9 @@ th, td { padding: 12px 14px; border-bottom: 1px solid var(--line); text-align: l
 th { position: sticky; top: 0; z-index: 1; background: #eef3f6; color: #334155; font-size: 13px; }
 td { font-size: 14px; }
 td.subject { line-height: 1.55; }
+td.subject strong { display: block; margin-bottom: 8px; color: #111827; font-size: 15px; }
+td.subject p { margin: 0; color: #3f4a59; white-space: pre-wrap; }
+.highlight-row { background: #f8fbfb; }
 .empty-row td { padding: 28px 14px; color: var(--muted); text-align: center; }
 @media (max-width: 760px) {
   .app-shell { width: min(100% - 20px, 1180px); padding-top: 18px; }
@@ -605,10 +843,11 @@ const companyNameFilter = document.querySelector("#companyNameFilter");
 const subjectFilter = document.querySelector("#subjectFilter");
 const sortTimeButton = document.querySelector("#sortTimeButton");
 
-const FIELD_TIME = "\\u6642\\u9593";
-const FIELD_COMPANY_ID = "\\u516c\\u53f8\\u4ee3\\u865f";
-const FIELD_COMPANY_NAME = "\\u516c\\u53f8\\u7c21\\u7a31";
-const FIELD_SUBJECT = "\\u4e3b\\u65e8";
+const FIELD_TIME = "\u6642\u9593";
+const FIELD_COMPANY_ID = "\u516c\u53f8\u4ee3\u865f";
+const FIELD_COMPANY_NAME = "\u516c\u53f8\u7c21\u7a31";
+const FIELD_SUBJECT = "\u4e3b\u65e8";
+const FIELD_DETAIL = "\u8a73\u7d30\u5167\u5bb9";
 let messages = [];
 let newestFirst = true;
 
@@ -628,10 +867,10 @@ function render() {
   const filtered = messages
     .filter((item) => normalize(item[FIELD_COMPANY_ID]).includes(idTerm))
     .filter((item) => normalize(item[FIELD_COMPANY_NAME]).includes(nameTerm))
-    .filter((item) => normalize(item[FIELD_SUBJECT]).includes(subjectTerm))
+    .filter((item) => `${normalize(item[FIELD_SUBJECT])} ${normalize(item[FIELD_DETAIL])}`.includes(subjectTerm))
     .sort((a, b) => {
-      const left = `${a["\\u65e5\\u671f"]} ${a[FIELD_TIME]}`;
-      const right = `${b["\\u65e5\\u671f"]} ${b[FIELD_TIME]}`;
+      const left = `${a["\u65e5\u671f"]} ${a[FIELD_TIME]}`;
+      const right = `${b["\u65e5\u671f"]} ${b[FIELD_TIME]}`;
       return newestFirst ? right.localeCompare(left) : left.localeCompare(right);
     });
   totalCount.textContent = String(filtered.length);
@@ -641,7 +880,10 @@ function render() {
         <td data-label="Time">${escapeHtml(item[FIELD_TIME])}</td>
         <td data-label="Company ID">${escapeHtml(item[FIELD_COMPANY_ID])}</td>
         <td data-label="Company">${escapeHtml(item[FIELD_COMPANY_NAME])}</td>
-        <td data-label="Subject" class="subject">${escapeHtml(item[FIELD_SUBJECT])}</td>
+        <td data-label="Subject and detail" class="subject">
+          <strong>${escapeHtml(item[FIELD_SUBJECT])}</strong>
+          <p>${escapeHtml(item[FIELD_DETAIL])}</p>
+        </td>
       </tr>
     `).join("")
     : '<tr class="empty-row"><td colspan="4">No matching rows.</td></tr>';
