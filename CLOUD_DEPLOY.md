@@ -22,6 +22,8 @@ In the GitHub repository, open `Settings -> Secrets and variables -> Actions`, t
 - `LINE_CHANNEL_ACCESS_TOKEN`: LINE Messaging API channel access token
 - `LINE_NOTIFY_ENABLED`: set to `true` to send LINE notifications
 - `LINE_NOTIFY_MAX_INDIVIDUAL`: maximum individual messages to send per sync, for example `10`
+- `LINE_TARGET_IDS`: optional admin fallback user IDs, separated by commas
+- `LINE_SUBSCRIBERS_SHEET_ID`: private Google Sheet ID used for LINE subscriber fallback
 
 Do not commit `service-account.json` to GitHub.
 
@@ -29,7 +31,35 @@ Do not commit `service-account.json` to GitHub.
 
 GitHub Actions uses `LINE_NOTIFY_MODE=broadcast`, so every user who added the LINE Official Account as a friend can receive new MOPS notifications.
 
-`LINE_TARGET_IDS` is no longer required for cloud notifications unless you later change the workflow back to push mode.
+If LINE broadcast is rate-limited, the job falls back to push notifications. Fallback recipients are loaded from:
+
+1. `LINE_TARGET_IDS`
+2. Active `user_id` rows in the private subscriber sheet configured by `LINE_SUBSCRIBERS_SHEET_ID`
+
+The subscriber sheet must not be public. Share it only with your own account and the Google service account.
+
+## LINE Subscriber Webhook
+
+Use `line_webhook.gs` in a Google Apps Script project to collect LINE Messaging API user IDs automatically.
+
+Apps Script properties:
+
+- `LINE_CHANNEL_ACCESS_TOKEN`: LINE Messaging API channel access token
+- `LINE_SUBSCRIBERS_SHEET_ID`: private Google Sheet ID for subscriber rows
+- `LINE_WEBHOOK_SECRET`: random secret used in the deployed webhook URL
+
+Deploy the Apps Script as a web app:
+
+- Execute as: Me
+- Who has access: Anyone
+
+Then set the LINE Developers webhook URL to:
+
+```text
+https://script.google.com/macros/s/DEPLOYMENT_ID/exec?secret=LINE_WEBHOOK_SECRET_VALUE
+```
+
+Apps Script web apps do not expose request headers to `doPost`, so this implementation uses the `LINE_WEBHOOK_SECRET` URL token instead of LINE's `X-Line-Signature` header. If full LINE signature verification is required later, move the webhook to Cloudflare Workers or another HTTP runtime that exposes request headers.
 
 ## Google Cloud Scheduler
 
