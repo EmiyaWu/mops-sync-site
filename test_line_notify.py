@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import line_notify
 from line_notify import LineNotifier
+from line_notify import QueuedLineNotifier
 from line_notify import SubscriberStore
 
 
@@ -27,6 +28,33 @@ class FakeSubscriberStore:
         if self.fail:
             raise RuntimeError("subscriber sheet failed")
         return self.user_ids
+
+
+class FakeQueueStore:
+    def __init__(self, due: bool = True) -> None:
+        self.due = due
+        self.messages: list[SimpleNamespace] = []
+        self.marked: list[str] = []
+        self.state: dict[str, str] = {}
+
+    def enqueue(self, messages: list[SimpleNamespace]) -> int:
+        existing = {message.data_key for message in self.messages}
+        new_messages = [message for message in messages if message.data_key not in existing]
+        self.messages.extend(new_messages)
+        return len(new_messages)
+
+    def pending_messages(self) -> list[SimpleNamespace]:
+        return self.messages
+
+    def is_due(self, interval_seconds: int) -> bool:
+        return self.due
+
+    def set_state(self, key: str, value: str) -> None:
+        self.state[key] = value
+
+    def mark_notified(self, data_keys: list[str], notified_at: str) -> None:
+        self.marked.extend(data_keys)
+        self.messages = [message for message in self.messages if message.data_key not in set(data_keys)]
 
 
 class LineNotifyBroadcastTest(unittest.TestCase):
@@ -162,6 +190,52 @@ class LineNotifyBroadcastTest(unittest.TestCase):
             self.assertEqual(store.active_user_ids(), ["U1", "U3"])
         finally:
             line_notify.gspread = original_gspread
+
+    def test_queued_notifier_waits_until_interval_is_due(self) -> None:
+        queue = FakeQueueStore(due=False)
+        notifier = LineNotifier(enabled=True, channel_access_token="token", notify_mode="broadcast")
+        sent_texts: list[str] = []
+        notifier._broadcast_text = sent_texts.append
+        queued = QueuedLineNotifier(notifier, queue, interval_seconds=900)
+        message = make_message(1)
+        message.data_key = "key-1"
+
+        sent = queued.notify_new_messages([message])
+
+        self.assertFalse(sent)
+        self.assertEqual(len(queue.messages), 1)
+        self.assertEqual(sent_texts, [])
+
+    def test_queued_notifier_marks_pending_messages_sent_when_due(self) -> None:
+        queue = FakeQueueStore(due=True)
+        notifier = LineNotifier(enabled=True, channel_access_token="token", notify_mode="broadcast")
+        sent_texts: list[str] = []
+        notifier._broadcast_text = sent_texts.append
+        queued = QueuedLineNotifier(notifier, queue, interval_seconds=900)
+        message = make_message(1)
+        message.data_key = "key-1"
+
+        sent = queued.notify_new_messages([message])
+
+        self.assertTrue(sent)
+        self.assertEqual(queue.marked, ["key-1"])
+        self.assertEqual(queue.messages, [])
+        self.assertEqual(len(sent_texts), 1)
+
+    def test_queued_notifier_keeps_pending_messages_when_send_fails(self) -> None:
+        queue = FakeQueueStore(due=True)
+        notifier = LineNotifier(enabled=True, channel_access_token="token", notify_mode="broadcast", broadcast_max_attempts=1)
+        notifier._broadcast_text = lambda text: (_ for _ in ()).throw(RuntimeError("HTTP Error 429:"))
+        notifier._push_text = lambda target_id, text: (_ for _ in ()).throw(RuntimeError("HTTP Error 429:"))
+        queued = QueuedLineNotifier(notifier, queue, interval_seconds=900)
+        message = make_message(1)
+        message.data_key = "key-1"
+
+        sent = queued.notify_new_messages([message])
+
+        self.assertFalse(sent)
+        self.assertEqual([pending.data_key for pending in queue.messages], ["key-1"])
+        self.assertEqual(queue.marked, [])
 
 
 if __name__ == "__main__":
