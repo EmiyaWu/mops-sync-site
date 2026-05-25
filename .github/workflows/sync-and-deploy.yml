@@ -54,8 +54,8 @@ jobs:
           LINE_NOTIFY_MODE: broadcast
           LINE_NOTIFY_MAX_INDIVIDUAL: ${{ secrets.LINE_NOTIFY_MAX_INDIVIDUAL }}
           LINE_NOTIFY_INTERVAL_SECONDS: 600
-          LINE_NOTIFY_ACTIVE_START_HOUR: 8
-          LINE_NOTIFY_ACTIVE_END_HOUR: 20
+          LINE_NOTIFY_ACTIVE_START_HOUR: 0
+          LINE_NOTIFY_ACTIVE_END_HOUR: 0
           LINE_NOTIFY_TIMEZONE: Asia/Taipei
           LINE_SUBSCRIBERS_SHEET_ID: ${{ secrets.LINE_SUBSCRIBERS_SHEET_ID }}
           MOPS_SITE_URL: https://mops-sync-site.pages.dev/
