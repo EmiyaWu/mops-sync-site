@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import unittest
+from datetime import datetime
 from types import SimpleNamespace
+from zoneinfo import ZoneInfo
 
 import line_notify
 from line_notify import LineNotifier
 from line_notify import QueuedLineNotifier
 from line_notify import SubscriberStore
+from line_notify import is_active_notification_hour
 
 
 def make_message(index: int = 1) -> SimpleNamespace:
@@ -196,7 +199,7 @@ class LineNotifyBroadcastTest(unittest.TestCase):
         notifier = LineNotifier(enabled=True, channel_access_token="token", notify_mode="broadcast")
         sent_texts: list[str] = []
         notifier._broadcast_text = sent_texts.append
-        queued = QueuedLineNotifier(notifier, queue, interval_seconds=900)
+        queued = QueuedLineNotifier(notifier, queue, interval_seconds=900, active_start_hour=0, active_end_hour=0)
         message = make_message(1)
         message.data_key = "key-1"
 
@@ -211,7 +214,7 @@ class LineNotifyBroadcastTest(unittest.TestCase):
         notifier = LineNotifier(enabled=True, channel_access_token="token", notify_mode="broadcast")
         sent_texts: list[str] = []
         notifier._broadcast_text = sent_texts.append
-        queued = QueuedLineNotifier(notifier, queue, interval_seconds=900)
+        queued = QueuedLineNotifier(notifier, queue, interval_seconds=900, active_start_hour=0, active_end_hour=0)
         message = make_message(1)
         message.data_key = "key-1"
 
@@ -227,7 +230,7 @@ class LineNotifyBroadcastTest(unittest.TestCase):
         notifier = LineNotifier(enabled=True, channel_access_token="token", notify_mode="broadcast", broadcast_max_attempts=1)
         notifier._broadcast_text = lambda text: (_ for _ in ()).throw(RuntimeError("HTTP Error 429:"))
         notifier._push_text = lambda target_id, text: (_ for _ in ()).throw(RuntimeError("HTTP Error 429:"))
-        queued = QueuedLineNotifier(notifier, queue, interval_seconds=900)
+        queued = QueuedLineNotifier(notifier, queue, interval_seconds=900, active_start_hour=0, active_end_hour=0)
         message = make_message(1)
         message.data_key = "key-1"
 
@@ -236,6 +239,35 @@ class LineNotifyBroadcastTest(unittest.TestCase):
         self.assertFalse(sent)
         self.assertEqual([pending.data_key for pending in queue.messages], ["key-1"])
         self.assertEqual(queue.marked, [])
+
+    def test_queued_notifier_waits_outside_active_hours(self) -> None:
+        queue = FakeQueueStore(due=True)
+        notifier = LineNotifier(enabled=True, channel_access_token="token", notify_mode="broadcast")
+        sent_texts: list[str] = []
+        notifier._broadcast_text = sent_texts.append
+        now_hour = datetime.now(ZoneInfo("UTC")).hour
+        active_start = (now_hour + 1) % 24
+        active_end = (now_hour + 2) % 24
+        queued = QueuedLineNotifier(
+            notifier,
+            queue,
+            interval_seconds=0,
+            active_start_hour=active_start,
+            active_end_hour=active_end,
+            timezone_name="UTC",
+        )
+        message = make_message(1)
+        message.data_key = "key-1"
+
+        sent = queued.notify_new_messages([message])
+
+        self.assertFalse(sent)
+        self.assertEqual(len(queue.messages), 1)
+        self.assertEqual(sent_texts, [])
+        self.assertEqual(queue.marked, [])
+
+    def test_active_notification_hour_supports_overnight_windows(self) -> None:
+        self.assertTrue(is_active_notification_hour(0, 0, "Asia/Taipei"))
 
 
 if __name__ == "__main__":
