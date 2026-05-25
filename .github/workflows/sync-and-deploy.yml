@@ -94,10 +94,5 @@ jobs:
         run: |
           npm install --global wrangler@latest
           wrangler --version
-          echo "Projects visible to this token/account before create:"
-          wrangler pages project list || true
-          echo "Ensuring Cloudflare Pages project exists: $CLOUDFLARE_PROJECT_NAME"
-          wrangler pages project create "$CLOUDFLARE_PROJECT_NAME" --production-branch=main || true
-          echo "Projects visible to this token/account after create:"
-          wrangler pages project list || true
+          echo "Deploying to Cloudflare Pages project: $CLOUDFLARE_PROJECT_NAME"
           wrangler pages deploy public --project-name="$CLOUDFLARE_PROJECT_NAME" --branch=main --commit-dirty=true
