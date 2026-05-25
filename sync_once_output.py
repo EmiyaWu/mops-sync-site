@@ -21,6 +21,7 @@ from mos_s import (
     MessageNormalizer,
     SpreadsheetNotFound,
     configure_console_encoding,
+    is_excluded_subject,
     prepare_credentials_from_json_secret,
 )
 
@@ -115,6 +116,10 @@ def sync_once_optimized(config: Config) -> int:
     for item in list_items:
         if not isinstance(item, dict):
             LOGGER.warning("Skip unexpected list item: %r", item)
+            continue
+        subject = str(item.get("subject") or "").strip()
+        if is_excluded_subject(subject):
+            LOGGER.info("Skip excluded MOPS subject: %s", subject)
             continue
         params = client._extract_detail_params(item)
         candidate = MessageNormalizer.normalize(item, "", params, fetched_at)
