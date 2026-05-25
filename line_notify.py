@@ -66,19 +66,18 @@ class LineNotifier:
         if not self.channel_access_token:
             LOGGER.warning("LINE notification skipped: LINE_CHANNEL_ACCESS_TOKEN is missing")
             return
-        texts = self.build_notification_texts(messages)
         if self.notify_mode == "broadcast":
-            for text in texts:
-                try:
-                    self._broadcast_text(text)
-                except Exception as exc:
-                    LOGGER.warning("LINE broadcast notification failed: %s", exc)
+            try:
+                self._broadcast_text(self.build_broadcast_text(messages))
+            except Exception as exc:
+                LOGGER.warning("LINE broadcast notification failed: %s", exc)
             return
 
         if not self.target_ids:
             LOGGER.warning("LINE notification skipped: LINE_TARGET_IDS is missing")
             return
 
+        texts = self.build_notification_texts(messages)
         for target_id in self.target_ids:
             for text in texts:
                 try:
@@ -100,6 +99,24 @@ class LineNotifier:
         for message in sorted_messages[: self.max_individual]:
             texts.append(format_line_message(message, self.site_url))
         return texts
+
+    def build_broadcast_text(self, messages: list[LineMessageLike]) -> str:
+        sorted_messages = sorted(messages, key=line_message_sort_key, reverse=True)
+        visible_messages = sorted_messages[: self.max_individual]
+        lines = [f"\u76ee\u524d\u6709 {len(sorted_messages)} \u7b46\u65b0\u7684\u91cd\u5927\u5373\u6642\u8a0a\u606f!"]
+        for index, message in enumerate(visible_messages, start=1):
+            lines.extend(
+                [
+                    "",
+                    f"{index}. \u516c\u53f8\u540d:{message.company_name}",
+                    f"\u4e3b\u65e8:{message.subject}",
+                ]
+            )
+        if len(sorted_messages) > len(visible_messages):
+            lines.extend(["", f"\u5176\u9918 {len(sorted_messages) - len(visible_messages)} \u7b46\u8acb\u67e5\u770b\u7db2\u7ad9\u3002"])
+        if self.site_url:
+            lines.extend(["", f"\u67e5\u770b\u7db2\u7ad9:{self.site_url}"])
+        return "\n".join(lines)
 
     def _push_text(self, target_id: str, text: str) -> None:
         response = requests.post(
