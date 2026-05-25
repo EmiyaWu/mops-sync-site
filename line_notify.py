@@ -8,6 +8,13 @@ from typing import Iterable, Protocol
 
 from curl_cffi import requests
 
+try:
+    import gspread
+    from gspread.exceptions import WorksheetNotFound
+except ImportError:  # pragma: no cover - exercised only when dependencies are missing
+    gspread = None
+    WorksheetNotFound = Exception
+
 
 LOGGER = logging.getLogger("mops_sync")
 LINE_PUSH_URL = "https://api.line.me/v2/bot/message/push"
@@ -19,6 +26,9 @@ DEFAULT_LINE_BROADCAST_SUBJECT_MAX_CHARS = 240
 DEFAULT_LINE_BROADCAST_MAX_ATTEMPTS = 2
 DEFAULT_LINE_BROADCAST_RETRY_SECONDS = 30
 DEFAULT_SITE_URL = "https://mops-sync-site.pages.dev/"
+SUBSCRIBER_WORKSHEET_TITLE = "line_subscribers"
+SUBSCRIBER_USER_ID = "user_id"
+SUBSCRIBER_STATUS = "status"
 
 
 class LineMessageLike(Protocol):
@@ -41,6 +51,7 @@ class LineNotifier:
         broadcast_max_chars: int = DEFAULT_LINE_BROADCAST_MAX_CHARS,
         broadcast_max_attempts: int = DEFAULT_LINE_BROADCAST_MAX_ATTEMPTS,
         broadcast_retry_seconds: int = DEFAULT_LINE_BROADCAST_RETRY_SECONDS,
+        subscriber_store: "SubscriberStore | None" = None,
         push_url: str = LINE_PUSH_URL,
         broadcast_url: str = LINE_BROADCAST_URL,
         timeout_seconds: int = 15,
@@ -54,6 +65,7 @@ class LineNotifier:
         self.broadcast_max_chars = max(broadcast_max_chars, 500)
         self.broadcast_max_attempts = max(broadcast_max_attempts, 1)
         self.broadcast_retry_seconds = max(broadcast_retry_seconds, 0)
+        self.subscriber_store = subscriber_store
         self.push_url = push_url
         self.broadcast_url = broadcast_url
         self.timeout_seconds = timeout_seconds
@@ -70,6 +82,7 @@ class LineNotifier:
             broadcast_max_chars=parse_int(os.getenv("LINE_BROADCAST_MAX_CHARS"), DEFAULT_LINE_BROADCAST_MAX_CHARS),
             broadcast_max_attempts=parse_int(os.getenv("LINE_BROADCAST_MAX_ATTEMPTS"), DEFAULT_LINE_BROADCAST_MAX_ATTEMPTS),
             broadcast_retry_seconds=parse_int(os.getenv("LINE_BROADCAST_RETRY_SECONDS"), DEFAULT_LINE_BROADCAST_RETRY_SECONDS),
+            subscriber_store=SubscriberStore.from_env(),
         )
 
     def notify_new_messages(self, messages: list[LineMessageLike]) -> None:
@@ -180,15 +193,80 @@ class LineNotifier:
         return False
 
     def _fallback_push_text(self, text: str) -> None:
-        if not self.target_ids:
+        recipients = self._fallback_target_ids()
+        if not recipients:
             LOGGER.warning("LINE broadcast failed and LINE_TARGET_IDS is missing; no fallback recipients")
             return
-        LOGGER.warning("LINE broadcast failed; fallback pushing summary to %s configured target(s)", len(self.target_ids))
-        for target_id in self.target_ids:
+        LOGGER.warning("LINE broadcast failed; fallback pushing summary to %s configured target(s)", len(recipients))
+        for target_id in recipients:
             try:
                 self._push_text(target_id, text)
             except Exception as exc:
                 LOGGER.warning("LINE fallback push failed for target %s: %s", mask_identifier(target_id), exc)
+
+    def _fallback_target_ids(self) -> list[str]:
+        subscriber_ids: list[str] = []
+        if self.subscriber_store is not None:
+            try:
+                subscriber_ids = self.subscriber_store.active_user_ids()
+                LOGGER.info("Loaded %s active LINE subscriber(s) for fallback", len(subscriber_ids))
+            except Exception as exc:
+                LOGGER.warning("LINE subscriber fallback list could not be loaded: %s", exc)
+        return merge_unique_ids([*self.target_ids, *subscriber_ids])
+
+
+class SubscriberStore:
+    def __init__(
+        self,
+        sheet_id: str,
+        credentials_path: str | None = None,
+        worksheet_title: str = SUBSCRIBER_WORKSHEET_TITLE,
+    ) -> None:
+        self.sheet_id = sheet_id.strip()
+        self.credentials_path = credentials_path
+        self.worksheet_title = worksheet_title
+
+    @classmethod
+    def from_env(cls) -> "SubscriberStore | None":
+        sheet_id = os.getenv("LINE_SUBSCRIBERS_SHEET_ID", "").strip()
+        if not sheet_id:
+            return None
+        return cls(sheet_id, os.getenv("GOOGLE_APPLICATION_CREDENTIALS") or default_credentials_path())
+
+    def active_user_ids(self) -> list[str]:
+        if gspread is None:
+            raise RuntimeError("gspread is not installed. Run: pip install -r requirements.txt")
+        if not self.credentials_path:
+            raise RuntimeError("GOOGLE_APPLICATION_CREDENTIALS is missing")
+        if not self.sheet_id:
+            return []
+
+        spreadsheet = gspread.service_account(filename=self.credentials_path).open_by_key(self.sheet_id)
+        try:
+            worksheet = spreadsheet.worksheet(self.worksheet_title)
+        except WorksheetNotFound:
+            LOGGER.warning("LINE subscriber worksheet %s not found", self.worksheet_title)
+            return []
+        rows = worksheet.get_all_values()
+        if not rows:
+            return []
+        headers = [normalize_header(value) for value in rows[0]]
+        try:
+            user_id_index = headers.index(SUBSCRIBER_USER_ID)
+        except ValueError:
+            LOGGER.warning("LINE subscriber worksheet is missing user_id header")
+            return []
+        status_index = headers.index(SUBSCRIBER_STATUS) if SUBSCRIBER_STATUS in headers else None
+
+        user_ids: list[str] = []
+        for row in rows[1:]:
+            user_id = row[user_id_index].strip() if user_id_index < len(row) else ""
+            if not user_id:
+                continue
+            status = row[status_index].strip().lower() if status_index is not None and status_index < len(row) else "active"
+            if status in {"", "active"}:
+                user_ids.append(user_id)
+        return merge_unique_ids(user_ids)
 
 
 def format_line_message(message: LineMessageLike, site_url: str = DEFAULT_SITE_URL) -> str:
@@ -229,6 +307,27 @@ def parse_int(value: str | None, default: int) -> int:
     except ValueError:
         LOGGER.warning("Invalid integer value %r, using default %s", value, default)
         return default
+
+
+def default_credentials_path() -> str | None:
+    candidate = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+    return candidate.strip() if candidate and candidate.strip() else None
+
+
+def normalize_header(value: str) -> str:
+    return str(value or "").strip().lower()
+
+
+def merge_unique_ids(values: Iterable[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        normalized = str(value or "").strip()
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        result.append(normalized)
+    return result
 
 
 def http_status_code(exc: Exception) -> int | None:
