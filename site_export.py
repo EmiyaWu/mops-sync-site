@@ -17,7 +17,7 @@ F_COMPANY_NAME = "\u516c\u53f8\u7c21\u7a31"
 F_SUBJECT = "\u4e3b\u65e8"
 F_DETAIL = "\u8a73\u7d30\u5167\u5bb9"
 PUBLIC_FIELDS = [F_DATE, F_TIME, F_COMPANY_ID, F_COMPANY_NAME, F_SUBJECT, F_DETAIL]
-EXCLUDED_SUBJECT_KEYWORDS = ("\u80a1\u6771\u5e38\u6703", "\u59d4\u54e1\u6703")
+EXCLUDED_SUBJECT_KEYWORDS = ("股東常會", "委員會")
 
 
 def main() -> int:
@@ -205,9 +205,18 @@ INDEX_HTML = """<!doctype html>
     <section class="toolbar-panel">
       <div class="toolbar">
         <label>\u516c\u53f8\u4ee3\u865f<input id="companyIdFilter" type="search" inputmode="numeric" placeholder="2330"></label>
-        <label>\u516c\u53f8\u7c21\u7a31<input id="companyNameFilter" type="search" placeholder="\u53f0\u7a4d\u96fb"></label>
+        <div class="company-picker-field">
+          <span>\u516c\u53f8\u7c21\u7a31</span>
+          <div class="company-picker" id="companyPicker">
+            <button class="company-picker-button" id="companyPickerButton" type="button" aria-expanded="false">\u5168\u90e8\u516c\u53f8</button>
+            <div class="company-menu" id="companyMenu">
+              <input id="companyOptionSearch" type="search" placeholder="\u641c\u5c0b\u516c\u53f8\u7c21\u7a31">
+              <div class="company-options" id="companyOptions"></div>
+            </div>
+          </div>
+        </div>
         <label class="wide-filter">\u95dc\u9375\u5b57<input id="subjectFilter" type="search" placeholder="\u641c\u5c0b\u4e3b\u65e8\u6216\u8a73\u7d30\u5167\u5bb9"></label>
-        <button id="sortTimeButton" type="button">\u6700\u65b0\u5728\u524d</button>
+        <button id="attentionToggleButton" type="button">\u53ea\u770b\u6ce8\u610f\u4ea4\u6613</button>
       </div>
       <div class="status-line">
         <span id="resultStatus">\u8cc7\u6599\u8f09\u5165\u4e2d</span>
@@ -331,6 +340,85 @@ button {
   font-weight: 800;
 }
 button:hover { background: var(--accent-strong); border-color: var(--accent-strong); }
+.company-picker-field {
+  position: relative;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+.company-picker { position: relative; }
+.company-picker-button {
+  position: relative;
+  padding: 9px 38px 9px 12px;
+  overflow: hidden;
+  color: var(--ink);
+  background: #fbfcfb;
+  border: 1px solid var(--line);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.company-picker-button::after {
+  content: "";
+  position: absolute;
+  right: 14px;
+  top: calc(50% + 3px);
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 6px solid var(--muted);
+}
+.company-picker-button:hover,
+.company-picker-button:focus {
+  color: var(--ink);
+  background: #fbfcfb;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(0, 111, 114, 0.12);
+}
+.company-menu {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 5;
+  display: none;
+  padding: 10px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+}
+.company-picker.open .company-menu { display: block; }
+.company-menu input { margin-top: 0; min-height: 38px; }
+.company-options {
+  display: grid;
+  gap: 4px;
+  max-height: 230px;
+  margin-top: 8px;
+  overflow-y: auto;
+}
+.company-option {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  padding: 7px 6px;
+  color: var(--ink);
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 700;
+}
+.company-option:hover { background: var(--accent-soft); }
+.company-option input {
+  width: 16px;
+  min-height: 16px;
+  margin: 0;
+}
+.company-option span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.company-empty { padding: 10px 6px; color: var(--muted); font-size: 13px; }
 .status-line {
   display: flex;
   justify-content: space-between;
@@ -478,9 +566,13 @@ SITE_JS = """
 const rowsBody = document.querySelector("#messageRows");
 const totalCount = document.querySelector("#totalCount");
 const companyIdFilter = document.querySelector("#companyIdFilter");
-const companyNameFilter = document.querySelector("#companyNameFilter");
+const companyPicker = document.querySelector("#companyPicker");
+const companyPickerButton = document.querySelector("#companyPickerButton");
+const companyMenu = document.querySelector("#companyMenu");
+const companyOptionSearch = document.querySelector("#companyOptionSearch");
+const companyOptions = document.querySelector("#companyOptions");
 const subjectFilter = document.querySelector("#subjectFilter");
-const sortTimeButton = document.querySelector("#sortTimeButton");
+const attentionToggleButton = document.querySelector("#attentionToggleButton");
 
 const FIELD_DATE = "\\u65e5\\u671f";
 const FIELD_TIME = "\\u6642\\u9593";
@@ -488,8 +580,11 @@ const FIELD_COMPANY_ID = "\\u516c\\u53f8\\u4ee3\\u865f";
 const FIELD_COMPANY_NAME = "\\u516c\\u53f8\\u7c21\\u7a31";
 const FIELD_SUBJECT = "\\u4e3b\\u65e8";
 const FIELD_DETAIL = "\\u8a73\\u7d30\\u5167\\u5bb9";
+const ATTENTION_KEYWORD = "\\u6ce8\\u610f\\u4ea4\\u6613\\u8cc7\\u8a0a";
 let messages = [];
-let newestFirst = true;
+let companyNames = [];
+let selectedCompanies = new Set();
+let attentionOnly = false;
 
 function normalize(value) { return String(value || "").trim().toLowerCase(); }
 function sortDate(value) {
@@ -541,18 +636,50 @@ function formatDetail(value) {
   flush();
   return parts.join("");
 }
+function updateCompanyPickerButton() {
+  const count = selectedCompanies.size;
+  if (!count) {
+    companyPickerButton.textContent = "\\u5168\\u90e8\\u516c\\u53f8";
+    return;
+  }
+  if (count === 1) {
+    companyPickerButton.textContent = [...selectedCompanies][0];
+    return;
+  }
+  companyPickerButton.textContent = `\\u5df2\\u9078 ${count} \\u5bb6\\u516c\\u53f8`;
+}
+function renderCompanyOptions() {
+  const term = normalize(companyOptionSearch.value);
+  const visibleNames = companyNames.filter((name) => normalize(name).includes(term));
+  companyOptions.innerHTML = visibleNames.length
+    ? visibleNames.map((name) => `
+      <label class="company-option" title="${escapeHtml(name)}">
+        <input type="checkbox" value="${escapeHtml(name)}" ${selectedCompanies.has(name) ? "checked" : ""}>
+        <span>${escapeHtml(name)}</span>
+      </label>
+    `).join("")
+    : '<div class="company-empty">\\u6c92\\u6709\\u7b26\\u5408\\u7684\\u516c\\u53f8</div>';
+  companyOptions.querySelectorAll("input[type='checkbox']").forEach((checkbox) => {
+    checkbox.addEventListener("change", () => {
+      if (checkbox.checked) selectedCompanies.add(checkbox.value);
+      else selectedCompanies.delete(checkbox.value);
+      updateCompanyPickerButton();
+      render();
+    });
+  });
+}
 function render() {
   const idTerm = normalize(companyIdFilter.value);
-  const nameTerm = normalize(companyNameFilter.value);
   const subjectTerm = normalize(subjectFilter.value);
   const filtered = messages
     .filter((item) => normalize(item[FIELD_COMPANY_ID]).includes(idTerm))
-    .filter((item) => normalize(item[FIELD_COMPANY_NAME]).includes(nameTerm))
+    .filter((item) => selectedCompanies.size === 0 || selectedCompanies.has(item[FIELD_COMPANY_NAME]))
     .filter((item) => `${normalize(item[FIELD_SUBJECT])} ${normalize(item[FIELD_DETAIL])}`.includes(subjectTerm))
+    .filter((item) => !attentionOnly || String(item[FIELD_SUBJECT] || "").includes(ATTENTION_KEYWORD))
     .sort((a, b) => {
       const leftKey = `${sortDate(a[FIELD_DATE])} ${sortTime(a[FIELD_TIME])}`;
       const rightKey = `${sortDate(b[FIELD_DATE])} ${sortTime(b[FIELD_TIME])}`;
-      return newestFirst ? rightKey.localeCompare(leftKey) : leftKey.localeCompare(rightKey);
+      return rightKey.localeCompare(leftKey);
     });
   totalCount.textContent = String(filtered.length);
   const sourceTitle = window.siteSourceTitle || "\\u6700\\u65b0\\u8cc7\\u6599";
@@ -575,14 +702,30 @@ async function loadData() {
   const response = await fetch("data/latest.json", { cache: "no-store" });
   const data = await response.json();
   messages = data.messages || [];
+  companyNames = [...new Set(messages.map((item) => item[FIELD_COMPANY_NAME]).filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b, "zh-Hant"));
   window.siteSourceTitle = data.source_title || "";
   document.querySelector("#generatedAt").textContent = data.generated_at ? new Date(data.generated_at).toLocaleString("zh-TW", { hour12: false }) : "-";
+  renderCompanyOptions();
+  updateCompanyPickerButton();
   render();
 }
-[companyIdFilter, companyNameFilter, subjectFilter].forEach((input) => input.addEventListener("input", render));
-sortTimeButton.addEventListener("click", () => {
-  newestFirst = !newestFirst;
-  sortTimeButton.textContent = newestFirst ? "\\u6700\\u65b0\\u5728\\u524d" : "\\u6700\\u820a\\u5728\\u524d";
+[companyIdFilter, subjectFilter].forEach((input) => input.addEventListener("input", render));
+companyPickerButton.addEventListener("click", () => {
+  companyPicker.classList.toggle("open");
+  const expanded = companyPicker.classList.contains("open");
+  companyPickerButton.setAttribute("aria-expanded", String(expanded));
+  if (expanded) companyOptionSearch.focus();
+});
+companyOptionSearch.addEventListener("input", renderCompanyOptions);
+document.addEventListener("click", (event) => {
+  if (companyPicker.contains(event.target)) return;
+  companyPicker.classList.remove("open");
+  companyPickerButton.setAttribute("aria-expanded", "false");
+});
+attentionToggleButton.addEventListener("click", () => {
+  attentionOnly = !attentionOnly;
+  attentionToggleButton.textContent = attentionOnly ? "\\u986f\\u793a\\u5168\\u90e8\\u91cd\\u8a0a" : "\\u53ea\\u770b\\u6ce8\\u610f\\u4ea4\\u6613";
   render();
 });
 loadData().catch(() => {
