@@ -20,7 +20,7 @@ In the GitHub repository, open `Settings -> Secrets and variables -> Actions`, t
 - `CLOUDFLARE_ACCOUNT_ID`: Cloudflare account ID
 - `CLOUDFLARE_PROJECT_NAME`: Cloudflare Pages project name
 - `LINE_CHANNEL_ACCESS_TOKEN`: LINE Messaging API channel access token
-- `LINE_NOTIFY_ENABLED`: set to `true` to send LINE notifications
+- `LINE_NOTIFY_ENABLED`: set to `true` to send LINE notifications. The current workflow is temporarily set to `false` to pause LINE API calls.
 - `LINE_NOTIFY_MAX_INDIVIDUAL`: maximum individual messages to send per sync, for example `10`
 - `LINE_NOTIFY_INTERVAL_SECONDS`: optional minimum seconds between LINE notification sends, default `600`
 - `LINE_NOTIFY_ACTIVE_START_HOUR`: optional first hour for LINE notifications, default `0`
