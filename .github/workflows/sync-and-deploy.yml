@@ -50,10 +50,10 @@ jobs:
           MOPS_STATE_PATH: state/seen_messages.json
           LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
           LINE_TARGET_IDS: ${{ secrets.LINE_TARGET_IDS }}
-          LINE_NOTIFY_ENABLED: false
+          LINE_NOTIFY_ENABLED: true
           LINE_NOTIFY_MODE: broadcast
           LINE_NOTIFY_MAX_INDIVIDUAL: ${{ secrets.LINE_NOTIFY_MAX_INDIVIDUAL }}
-          LINE_NOTIFY_INTERVAL_SECONDS: 600
+          LINE_NOTIFY_INTERVAL_SECONDS: 30
           LINE_NOTIFY_ACTIVE_START_HOUR: 0
           LINE_NOTIFY_ACTIVE_END_HOUR: 0
           LINE_NOTIFY_TIMEZONE: Asia/Taipei
