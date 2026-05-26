@@ -113,13 +113,15 @@ def sync_once_optimized(config: Config) -> int:
     list_items = client.fetch_list()
     existing_keys = writer.existing_keys(now)
     candidates: list[tuple[MOPSMessage, dict[str, Any]]] = []
+    excluded_count = 0
     for item in list_items:
         if not isinstance(item, dict):
             LOGGER.warning("Skip unexpected list item: %r", item)
             continue
         subject = str(item.get("subject") or "").strip()
         if is_excluded_subject(subject):
-            LOGGER.info("Skip excluded MOPS subject: %s", subject)
+            excluded_count += 1
+            LOGGER.debug("Skip excluded MOPS subject: %s", subject)
             continue
         params = client._extract_detail_params(item)
         candidate = MessageNormalizer.normalize(item, "", params, fetched_at)
@@ -132,8 +134,9 @@ def sync_once_optimized(config: Config) -> int:
         writer.organize_daily_worksheets()
         flush_line_notifications_if_due()
         LOGGER.info(
-            "No new rows. fetched_list=%s new_candidates=0 detail_fetched=0 appended=0 skipped=%s",
-            len(candidate_messages),
+            "No new rows. fetched_list=%s excluded=%s new_candidates=0 detail_fetched=0 appended=0 skipped=%s",
+            len(list_items),
+            excluded_count,
             len(candidate_messages),
         )
         return 0
@@ -156,8 +159,9 @@ def sync_once_optimized(config: Config) -> int:
     appended_count = writer.append_messages(now, new_messages)
     deduper.mark_seen(new_messages)
     LOGGER.info(
-        "Sync complete. fetched_list=%s new_candidates=%s detail_fetched=%s appended=%s skipped=%s",
-        len(candidate_messages),
+        "Sync complete. fetched_list=%s excluded=%s new_candidates=%s detail_fetched=%s appended=%s skipped=%s",
+        len(list_items),
+        excluded_count,
         len(new_candidates),
         detail_fetched,
         appended_count,
