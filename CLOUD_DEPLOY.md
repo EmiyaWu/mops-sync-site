@@ -20,9 +20,9 @@ In the GitHub repository, open `Settings -> Secrets and variables -> Actions`, t
 - `CLOUDFLARE_ACCOUNT_ID`: Cloudflare account ID
 - `CLOUDFLARE_PROJECT_NAME`: Cloudflare Pages project name
 - `LINE_CHANNEL_ACCESS_TOKEN`: LINE Messaging API channel access token
-- `LINE_NOTIFY_ENABLED`: set to `true` to send LINE notifications. The current workflow is temporarily set to `true` for LINE API testing.
+- `LINE_NOTIFY_ENABLED`: set to `true` to send LINE notifications. The current workflow is temporarily set to `false` to pause LINE API calls.
 - `LINE_NOTIFY_MAX_INDIVIDUAL`: maximum individual messages to send per sync, for example `10`
-- `LINE_NOTIFY_INTERVAL_SECONDS`: optional minimum seconds between LINE notification sends, default `600`. The current workflow uses `30` for LINE API testing.
+- `LINE_NOTIFY_INTERVAL_SECONDS`: optional minimum seconds between LINE notification sends, default `600`. The current workflow uses `3600` as the next conservative value when LINE is re-enabled.
 - `LINE_NOTIFY_ACTIVE_START_HOUR`: optional first hour for LINE notifications, default `0`
 - `LINE_NOTIFY_ACTIVE_END_HOUR`: optional stop hour for LINE notifications, default `0`
 - `LINE_TARGET_IDS`: optional admin fallback user IDs, separated by commas
@@ -34,7 +34,7 @@ Do not commit `service-account.json` to GitHub.
 
 GitHub Actions uses `LINE_NOTIFY_MODE=broadcast`, so every user who added the LINE Official Account as a friend can receive new MOPS notifications.
 
-New MOPS rows are first stored in `line_notify_queue` in the private subscriber Sheet. GitHub Actions still checks MOPS every 5 minutes. The workflow currently attempts LINE sending at most once every 30 seconds for testing.
+New MOPS rows are first stored in `line_notify_queue` in the private subscriber Sheet. GitHub Actions still checks MOPS every 5 minutes. LINE API calls are currently paused in the workflow.
 
 LINE notifications can be sent all day by default. Setting `LINE_NOTIFY_ACTIVE_START_HOUR` and `LINE_NOTIFY_ACTIVE_END_HOUR` to the same value disables the active-hours restriction.
 
