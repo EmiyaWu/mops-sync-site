@@ -4,8 +4,9 @@
 
 - Google Cloud Scheduler triggers GitHub Actions every 5 minutes through the `workflow_dispatch` API.
 - GitHub Actions still keeps its own schedule as a fallback, but Google Cloud Scheduler is the primary scheduler.
-- The job always runs `python sync_once_output.py` to check MOPS and update Google Sheet.
+- The job always runs `python sync_once_output.py` to check MOPS, update Google Sheet, and write the current run's new rows to `state/new_messages.json`.
 - The public site is exported and deployed only when new MOPS rows are written, unless `force_deploy` is enabled manually.
+- Telegram notification runs only after Cloudflare Pages deployment succeeds, so the website link should already show the latest rows.
 - Google Sheet keeps the full internal dataset.
 - `public/` contains only the semi-public static website.
 - Cloudflare Pages deploys the static website.
@@ -28,7 +29,7 @@ Do not commit `service-account.json` to GitHub.
 
 ## Telegram Notifications
 
-GitHub Actions sends a single Telegram summary message after new MOPS rows are successfully written to Google Sheet.
+GitHub Actions sends a single Telegram summary message after new MOPS rows are successfully written to Google Sheet and the public website is deployed successfully.
 
 Example:
 
