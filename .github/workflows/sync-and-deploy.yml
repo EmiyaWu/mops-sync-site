@@ -48,16 +48,10 @@ jobs:
           MOPS_SHEET_ID: ${{ secrets.MOPS_SHEET_ID }}
           TZ: Asia/Taipei
           MOPS_STATE_PATH: state/seen_messages.json
-          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
-          LINE_TARGET_IDS: ${{ secrets.LINE_TARGET_IDS }}
-          LINE_NOTIFY_ENABLED: false
-          LINE_NOTIFY_MODE: broadcast
-          LINE_NOTIFY_MAX_INDIVIDUAL: ${{ secrets.LINE_NOTIFY_MAX_INDIVIDUAL }}
-          LINE_NOTIFY_INTERVAL_SECONDS: 3600
-          LINE_NOTIFY_ACTIVE_START_HOUR: 0
-          LINE_NOTIFY_ACTIVE_END_HOUR: 0
-          LINE_NOTIFY_TIMEZONE: Asia/Taipei
-          LINE_SUBSCRIBERS_SHEET_ID: ${{ secrets.LINE_SUBSCRIBERS_SHEET_ID }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_IDS: ${{ secrets.TELEGRAM_CHAT_IDS }}
+          TELEGRAM_NOTIFY_ENABLED: ${{ secrets.TELEGRAM_NOTIFY_ENABLED }}
+          TELEGRAM_NOTIFY_MAX_ITEMS: ${{ secrets.TELEGRAM_NOTIFY_MAX_ITEMS }}
           MOPS_SITE_URL: https://mops-sync-site.pages.dev/
         run: python sync_once_output.py
 
