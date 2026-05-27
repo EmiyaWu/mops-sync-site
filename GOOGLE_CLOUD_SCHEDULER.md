@@ -88,7 +88,7 @@ This body does not pass `force_deploy`, so normal 5-minute checks only deploy Cl
 4. Observe 15 to 30 minutes. Runs should appear about every 5 minutes.
 5. Confirm:
    - Google Sheet does not duplicate rows.
-   - LINE only sends messages when new MOPS data is written.
+   - Telegram only sends messages when new MOPS data is written.
    - The website updates normally when new rows exist.
 
 ## Notes
