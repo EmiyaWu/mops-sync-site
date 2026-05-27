@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import Any, Iterable
 from zoneinfo import ZoneInfo
 
-import mos_s
 from mos_s import (
     Config,
     Deduper,
@@ -27,11 +26,6 @@ from telegram_notify import TelegramNotifier
 
 
 LOGGER = logging.getLogger("mops_sync")
-
-
-class NoopNotifier:
-    def notify_new_messages(self, messages: list[MOPSMessage]) -> None:
-        return
 
 
 def write_github_output(name: str, value: Any) -> None:
@@ -67,8 +61,6 @@ def normalize_time_for_sort(value: str) -> str:
 
 def install_sheet_writer_patch() -> None:
     notifier = TelegramNotifier.from_env()
-    if hasattr(mos_s, "LineNotifier"):
-        mos_s.LineNotifier.from_env = classmethod(lambda cls: NoopNotifier())
 
     def append_messages(self: GoogleSheetWriter, worksheet_date, messages: list[MOPSMessage]) -> int:
         if not messages:
