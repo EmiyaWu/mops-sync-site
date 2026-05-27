@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import json
 import os
 import re
 import time
@@ -22,7 +23,6 @@ from mos_s import (
     is_excluded_subject,
     prepare_credentials_from_json_secret,
 )
-from telegram_notify import TelegramNotifier
 
 
 LOGGER = logging.getLogger("mops_sync")
@@ -60,8 +60,6 @@ def normalize_time_for_sort(value: str) -> str:
 
 
 def install_sheet_writer_patch() -> None:
-    notifier = TelegramNotifier.from_env()
-
     def append_messages(self: GoogleSheetWriter, worksheet_date, messages: list[MOPSMessage]) -> int:
         if not messages:
             self.organize_daily_worksheets()
@@ -72,15 +70,33 @@ def install_sheet_writer_patch() -> None:
         rows = [message.to_sheet_row() for message in sorted_messages]
         self._with_retry(lambda: worksheet.insert_rows(rows, row=2, value_input_option="USER_ENTERED"))
         self.organize_daily_worksheets()
-        if notifier is not None:
-            try:
-                notifier.notify_new_messages(sorted_messages)
-            except Exception as exc:
-                LOGGER.warning("Telegram notification failed. Sheet sync remains complete: %s", exc)
         return len(messages)
 
     GoogleSheetWriter.append_messages = append_messages
-    LOGGER.info("Installed newest-first Sheet writer patch with Telegram notifier")
+    LOGGER.info("Installed newest-first Sheet writer patch")
+
+
+def new_messages_output_path(config: Config) -> Path:
+    return Path(os.getenv("MOPS_NEW_MESSAGES_OUTPUT", str(config.state_path.parent / "new_messages.json")))
+
+
+def write_new_messages_payload(messages: list[MOPSMessage], generated_at: datetime, output_path: Path) -> None:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "generated_at": generated_at.isoformat(timespec="seconds"),
+        "count": len(messages),
+        "messages": [
+            {
+                "date": message.date,
+                "time": message.time,
+                "company_id": message.company_id,
+                "company_name": message.company_name,
+                "subject": message.subject,
+            }
+            for message in sort_messages_newest_first(messages)
+        ],
+    }
+    output_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def sync_once_optimized(config: Config) -> int:
@@ -89,6 +105,7 @@ def sync_once_optimized(config: Config) -> int:
     deduper = Deduper(config.state_path)
     now = datetime.now(ZoneInfo(config.timezone))
     fetched_at = now.isoformat(timespec="seconds")
+    output_path = new_messages_output_path(config)
 
     list_items = client.fetch_list()
     existing_keys = writer.existing_keys(now)
@@ -112,6 +129,7 @@ def sync_once_optimized(config: Config) -> int:
     new_keys = {message.data_key for message in new_candidates}
     if not new_candidates:
         writer.organize_daily_worksheets()
+        write_new_messages_payload([], now, output_path)
         LOGGER.info(
             "No new rows. fetched_list=%s excluded=%s new_candidates=0 detail_fetched=0 appended=0 skipped=%s",
             len(list_items),
@@ -137,6 +155,7 @@ def sync_once_optimized(config: Config) -> int:
 
     appended_count = writer.append_messages(now, new_messages)
     deduper.mark_seen(new_messages)
+    write_new_messages_payload(new_messages, now, output_path)
     LOGGER.info(
         "Sync complete. fetched_list=%s excluded=%s new_candidates=%s detail_fetched=%s appended=%s skipped=%s",
         len(list_items),
