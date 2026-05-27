@@ -48,11 +48,7 @@ jobs:
           MOPS_SHEET_ID: ${{ secrets.MOPS_SHEET_ID }}
           TZ: Asia/Taipei
           MOPS_STATE_PATH: state/seen_messages.json
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_IDS: ${{ secrets.TELEGRAM_CHAT_IDS }}
-          TELEGRAM_NOTIFY_ENABLED: ${{ secrets.TELEGRAM_NOTIFY_ENABLED }}
-          TELEGRAM_NOTIFY_MAX_ITEMS: ${{ secrets.TELEGRAM_NOTIFY_MAX_ITEMS }}
-          MOPS_SITE_URL: https://mops-sync-site.pages.dev/
+          MOPS_NEW_MESSAGES_OUTPUT: state/new_messages.json
         run: python sync_once_output.py
 
       - name: Export public site
@@ -95,3 +91,14 @@ jobs:
           wrangler --version
           echo "Deploying to Cloudflare Pages project: $CLOUDFLARE_PROJECT_NAME"
           wrangler pages deploy public --project-name="$CLOUDFLARE_PROJECT_NAME" --branch=main --commit-dirty=true
+
+      - name: Notify Telegram
+        if: ${{ steps.sync.outputs.has_new_rows == 'true' && env.CLOUDFLARE_API_TOKEN != '' && env.CLOUDFLARE_ACCOUNT_ID != '' && env.CLOUDFLARE_PROJECT_NAME != '' }}
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_IDS: ${{ secrets.TELEGRAM_CHAT_IDS }}
+          TELEGRAM_NOTIFY_ENABLED: ${{ secrets.TELEGRAM_NOTIFY_ENABLED }}
+          TELEGRAM_NOTIFY_MAX_ITEMS: ${{ secrets.TELEGRAM_NOTIFY_MAX_ITEMS }}
+          MOPS_NEW_MESSAGES_OUTPUT: state/new_messages.json
+          MOPS_SITE_URL: https://mops-sync-site.pages.dev/
+        run: python notify_telegram.py
