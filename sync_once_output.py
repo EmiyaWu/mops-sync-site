@@ -11,7 +11,6 @@ from typing import Any, Iterable
 from zoneinfo import ZoneInfo
 
 import mos_s
-from line_notify import QueuedLineNotifier
 from mos_s import (
     Config,
     Deduper,
@@ -24,10 +23,10 @@ from mos_s import (
     is_excluded_subject,
     prepare_credentials_from_json_secret,
 )
+from telegram_notify import TelegramNotifier
 
 
 LOGGER = logging.getLogger("mops_sync")
-LINE_NOTIFIER: QueuedLineNotifier | None = None
 
 
 class NoopNotifier:
@@ -67,9 +66,7 @@ def normalize_time_for_sort(value: str) -> str:
 
 
 def install_sheet_writer_patch() -> None:
-    global LINE_NOTIFIER
-    notifier = QueuedLineNotifier.from_env()
-    LINE_NOTIFIER = notifier
+    notifier = TelegramNotifier.from_env()
     if hasattr(mos_s, "LineNotifier"):
         mos_s.LineNotifier.from_env = classmethod(lambda cls: NoopNotifier())
 
@@ -87,20 +84,11 @@ def install_sheet_writer_patch() -> None:
             try:
                 notifier.notify_new_messages(sorted_messages)
             except Exception as exc:
-                LOGGER.warning("LINE notification failed. Sheet sync remains complete: %s", exc)
+                LOGGER.warning("Telegram notification failed. Sheet sync remains complete: %s", exc)
         return len(messages)
 
     GoogleSheetWriter.append_messages = append_messages
-    LOGGER.info("Installed newest-first Sheet writer patch with line_notify notifier")
-
-
-def flush_line_notifications_if_due() -> None:
-    if LINE_NOTIFIER is None:
-        return
-    try:
-        LINE_NOTIFIER.flush_due()
-    except Exception as exc:
-        LOGGER.warning("LINE notification queue flush failed. Sheet sync remains complete: %s", exc)
+    LOGGER.info("Installed newest-first Sheet writer patch with Telegram notifier")
 
 
 def sync_once_optimized(config: Config) -> int:
@@ -132,7 +120,6 @@ def sync_once_optimized(config: Config) -> int:
     new_keys = {message.data_key for message in new_candidates}
     if not new_candidates:
         writer.organize_daily_worksheets()
-        flush_line_notifications_if_due()
         LOGGER.info(
             "No new rows. fetched_list=%s excluded=%s new_candidates=0 detail_fetched=0 appended=0 skipped=%s",
             len(list_items),
