@@ -57,7 +57,19 @@ jobs:
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           MOPS_SHEET_ID: ${{ secrets.MOPS_SHEET_ID }}
           TZ: Asia/Taipei
-        run: python site_export.py
+        run: |
+          for attempt in 1 2 3; do
+            if python site_export.py; then
+              exit 0
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              echo "Site export failed after $attempt attempts."
+              exit 1
+            fi
+            sleep_seconds=$((attempt * 10))
+            echo "Site export failed, retry $attempt/2 after ${sleep_seconds} seconds."
+            sleep "$sleep_seconds"
+          done
 
       - name: Upload static site artifact
         if: ${{ steps.sync.outputs.has_new_rows == 'true' || github.event.inputs.force_deploy == 'true' }}
